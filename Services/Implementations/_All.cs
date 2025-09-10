@@ -633,9 +633,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
     public async Task<IEnumerable<NotificationSubscription>> GetSubscriptionsByApplicationAsync(Guid applicationId)
     {
-      return await _context.NotificationSubscriptions
+      var subscriptions = await _context.NotificationSubscriptions
         .Where(s => s.ApplicationId == applicationId && s.IsActive)
         .ToListAsync();
+      
+      return subscriptions;
     }
 
     public async Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions)

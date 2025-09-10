@@ -1,5 +1,6 @@
 ﻿using System.Linq.Expressions;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
+using WsSeguUta.AuthSystem.API.Models.Entities;
 
 namespace WsSeguUta.AuthSystem.API.Services.Interfaces
 {
@@ -16,18 +17,6 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId);
     Task<object?> GetApplicationStatsAsync(string clientId);
   }
-
-  // CRUD genÃ©rico para todas las entidades
-  public interface ICrudService<TEntity, TCreate, TUpdate> where TEntity: class
-  {
-    Task<IEnumerable<TEntity>> ListAsync(int page,int size);
-    Task<TEntity?> GetAsync(params object[] key);
-    Task<TEntity> CreateAsync(TCreate dto);
-    Task<TEntity?> UpdateAsync(object key, TUpdate dto);
-    Task<bool> DeleteAsync(params object[] key);
-  }
-}
-
   
   // ========== INTERFAZ PARA NOTIFICACIONES ==========
   public interface INotificationService 
@@ -43,4 +32,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task<IEnumerable<SubscriptionStatsDto>> GetSubscriptionStatsAsync(Guid applicationId);
     Task ProcessPendingNotificationsAsync();
   }
+
+  // CRUD genérico para todas las entidades
+  public interface ICrudService<TEntity, TCreate, TUpdate> where TEntity: class
+  {
+    Task<IEnumerable<TEntity>> ListAsync(int page,int size);
+    Task<TEntity?> GetAsync(params object[] key);
+    Task<TEntity> CreateAsync(TCreate dto);
+    Task<TEntity?> UpdateAsync(object key, TUpdate dto);
+    Task<bool> DeleteAsync(params object[] key);
+  }
+}
 
