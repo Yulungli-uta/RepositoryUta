@@ -241,7 +241,6 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     public async Task<TEntity?> UpdateAsync(object key, TUpdate dto){ var current = await _repo.GetAsync(key); if (current==null) return null; _map.Map(dto, current); return await _repo.UpdateAsync(current); }
     public Task<bool> DeleteAsync(params object[] key)=>_repo.DeleteAsync(key);
   }
-}
 
   // ========== IMPLEMENTACIÓN DEL SERVICIO CENTRALIZADOR ==========
   public class AppAuthService : IAppAuthService
@@ -857,6 +856,71 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       }
     }
 
+    // ✅ Método para enviar webhook individual
+    private async Task SendWebhookAsync(NotificationSubscription subscription, object eventData)
+    {
+      var startTime = DateTime.UtcNow;
+      var httpClient = _httpClientFactory.CreateClient();
+      
+      try
+      {
+        var jsonPayload = System.Text.Json.JsonSerializer.Serialize(eventData);
+        var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
+
+        // Configurar headers y timeout
+        httpClient.Timeout = TimeSpan.FromSeconds(30);
+        if (!string.IsNullOrEmpty(subscription.SecretKey))
+        {
+          var signature = GenerateSignature(jsonPayload, subscription.SecretKey);
+          content.Headers.Add("X-Webhook-Signature", signature);
+        }
+
+        // Enviar webhook
+        var response = await httpClient.PostAsync(subscription.WebhookUrl, content);
+        var responseBody = await response.Content.ReadAsStringAsync();
+        var responseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+
+        // Registrar log
+        var log = new NotificationLog
+        {
+          SubscriptionId = subscription.Id,
+          EventType = eventData.GetType().Name.Replace("EventData", ""),
+          WebhookUrl = subscription.WebhookUrl,
+          HttpStatusCode = (int)response.StatusCode,
+          ResponseBody = responseBody,
+          IsSuccess = response.IsSuccessStatusCode,
+          ResponseTime = responseTime,
+          ErrorMessage = response.IsSuccessStatusCode ? null : $"HTTP {response.StatusCode}: {responseBody}"
+        };
+
+        _context.NotificationLogs.Add(log);
+        await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Webhook sent to {WebhookUrl} with status {StatusCode}", subscription.WebhookUrl, response.StatusCode);
+      }
+      catch (Exception ex)
+      {
+        var responseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+        
+        // Registrar log de error
+        var errorLog = new NotificationLog
+        {
+          SubscriptionId = subscription.Id,
+          EventType = eventData.GetType().Name.Replace("EventData", ""),
+          WebhookUrl = subscription.WebhookUrl,
+          HttpStatusCode = 0,
+          IsSuccess = false,
+          ResponseTime = responseTime,
+          ErrorMessage = ex.Message
+        };
+
+        _context.NotificationLogs.Add(errorLog);
+        await _context.SaveChangesAsync();
+
+        _logger.LogError(ex, "Error sending webhook to {WebhookUrl}", subscription.WebhookUrl);
+      }
+    }
+
     // ========== MÉTODOS OPTIMIZADOS SIN NotificationEvent ==========
     
     private async Task<IEnumerable<string>> GetUserRoles(Guid userId)
@@ -888,5 +952,4 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       return Convert.ToHexString(hash).ToLower();
     }
   }
-
 }
