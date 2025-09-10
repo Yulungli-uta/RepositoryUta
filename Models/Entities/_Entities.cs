@@ -34,27 +34,11 @@ public class Application
     public string ClientSecretHash { get; set; } = string.Empty; 
     public string? Description { get; set; } 
     public bool IsActive { get; set; } = true; 
-    public string? AllowedOrigins { get; set; } 
-    public int TokenExpirationMin { get; set; } = 60; 
-    public int RefreshTokenExpDays { get; set; } = 30; 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
     public string? CreatedBy { get; set; } 
     public DateTime LastModified { get; set; } = DateTime.UtcNow; 
     public string? ModifiedBy { get; set; } 
     public bool IsDeleted { get; set; } = false; 
-}
-
-public class ApplicationToken 
-{ 
-    public Guid Id { get; set; } = Guid.NewGuid(); 
-    public Guid ApplicationId { get; set; } 
-    public string TokenHash { get; set; } = string.Empty; 
-    public string TokenType { get; set; } = "Bearer"; 
-    public DateTime ExpiresAt { get; set; } 
-    public bool IsActive { get; set; } = true; 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
-    public string? IpAddress { get; set; } 
-    public string? UserAgent { get; set; } 
 }
 
 public class LegacyAuthLog 
@@ -64,16 +48,15 @@ public class LegacyAuthLog
     public Guid? UserId { get; set; } 
     public string UserEmail { get; set; } = string.Empty; 
     public string AuthResult { get; set; } = string.Empty; 
+    public string AuthType { get; set; } = string.Empty; // "Local", "Office365", "Legacy"
     public string? FailureReason { get; set; } 
     public string? IpAddress { get; set; } 
     public string? UserAgent { get; set; } 
-    public string? RequestData { get; set; } 
     public int? ResponseTime { get; set; } 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
 }
 
-
-// ========== ENTIDADES PARA NOTIFICACIONES DE OFFICE365 ==========
+// ========== ENTIDADES OPTIMIZADAS PARA NOTIFICACIONES ==========
 
 public class NotificationSubscription 
 { 
@@ -81,41 +64,26 @@ public class NotificationSubscription
     public Guid ApplicationId { get; set; } 
     public string EventType { get; set; } = string.Empty; // "Login", "Logout", "UserCreated", etc.
     public string WebhookUrl { get; set; } = string.Empty; 
-    public string? SecretKey { get; set; } // Para validar la autenticidad del webhook
+    public string? SecretKey { get; set; } // Para validar la autenticidad del webhook con HMAC
     public bool IsActive { get; set; } = true; 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
-    public DateTime? LastNotified { get; set; } 
-    public int FailureCount { get; set; } = 0; 
-    public DateTime? LastFailure { get; set; } 
-    public string? LastError { get; set; } 
-}
-
-public class NotificationEvent 
-{ 
-    public long Id { get; set; } 
-    public Guid? UserId { get; set; } 
-    public Guid? ApplicationId { get; set; } 
-    public string EventType { get; set; } = string.Empty; 
-    public string EventData { get; set; } = string.Empty; // JSON con datos del evento
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
-    public bool IsProcessed { get; set; } = false; 
-    public DateTime? ProcessedAt { get; set; } 
-    public int RetryCount { get; set; } = 0; 
-    public string? LastError { get; set; } 
+    public string? CreatedBy { get; set; }
+    public DateTime? ModifiedAt { get; set; }
+    public string? ModifiedBy { get; set; }
 }
 
 public class NotificationLog 
 { 
     public long Id { get; set; } 
     public Guid SubscriptionId { get; set; } 
-    public long EventId { get; set; } 
+    public string EventType { get; set; } = string.Empty; 
+    public Guid? UserId { get; set; } 
     public string WebhookUrl { get; set; } = string.Empty; 
-    public string RequestPayload { get; set; } = string.Empty; 
-    public int ResponseStatusCode { get; set; } 
+    public int? HttpStatusCode { get; set; } 
     public string? ResponseBody { get; set; } 
-    public bool IsSuccess { get; set; } 
-    public int ResponseTimeMs { get; set; } 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public int? ResponseTime { get; set; } // en milisegundos
+    public bool IsSuccess { get; set; } = false; 
     public string? ErrorMessage { get; set; } 
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
 }
 

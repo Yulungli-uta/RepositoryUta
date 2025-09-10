@@ -6,7 +6,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
 {
   public interface IAuthService { Task<TokenPair?> LoginLocalAsync(string email,string password); Task<TokenPair?> RefreshAsync(string refreshToken); Task<bool> LogoutAsync(string refreshToken); Task<object?> MeAsync(Guid userId); Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId); }
   public interface ITokenService { string Create(Guid userId,string email,IEnumerable<string> roles); string Hash(string input); }
-  public interface IAzureAuthService { Task<(string Url,string State)> BuildAuthUrlAsync(); Task<TokenPair?> HandleCallbackAsync(string code,string state); }
+  public interface IAzureAuthService { Task<(string Url,string State)> BuildAuthUrlAsync(string? clientId = null); Task<TokenPair?> HandleCallbackAsync(string code,string state); }
   public interface IMenuService { Task<IEnumerable<object>> GetMenuForUserAsync(Guid userId); }
   
   // ========== NUEVAS INTERFACES PARA CENTRALIZADOR ==========
@@ -26,6 +26,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task<bool> DeleteSubscriptionAsync(Guid subscriptionId);
     Task<IEnumerable<NotificationSubscription>> GetSubscriptionsByApplicationAsync(Guid applicationId);
     Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions);
+    Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId);
     Task NotifyLogoutEventAsync(Guid userId);
     Task NotifyUserCreatedEventAsync(Guid userId);
     Task<NotificationStatsDto> GetNotificationStatsAsync();

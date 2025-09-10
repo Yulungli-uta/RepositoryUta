@@ -163,15 +163,34 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       _notificationService=notificationService;
     }
 
-    public async Task<(string Url,string State)> BuildAuthUrlAsync()
+    public async Task<(string Url,string State)> BuildAuthUrlAsync(string? clientId = null)
     {
-      var tenant=_cfg["AzureAd:TenantId"]; var clientId=_cfg["AzureAd:ClientId"]; var authority=$"https://login.microsoftonline.com/{tenant}/v2.0"; var redirect=_cfg["AzureAd:RedirectUri"]!;
-      var cca=ConfidentialClientApplicationBuilder.Create(clientId).WithAuthority(authority).WithClientSecret(_cfg["AzureAd:ClientSecret"]).WithRedirectUri(redirect).Build();
+      var stateGuid = Guid.NewGuid().ToString("N");
+      
+      // ✅ Crear state con información de la aplicación
+      var stateData = new
+      {
+        stateId = stateGuid,
+        clientId = clientId,
+        timestamp = DateTime.UtcNow.ToString("O"),
+        source = "azure_auth"
+      };
+      
+      var stateJson = System.Text.Json.JsonSerializer.Serialize(stateData);
+      var stateEncoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(stateJson));
+      
+      // ✅ Guardar en cache para validación
+      _cache.Set($"ms_state:{stateGuid}", stateData, TimeSpan.FromMinutes(10));
+      
+      var tenant=_cfg["AzureAd:TenantId"]; var clientIdAzure=_cfg["AzureAd:ClientId"]; var authority=$"https://login.microsoftonline.com/{tenant}/v2.0"; var redirect=_cfg["AzureAd:RedirectUri"]!;
+      var cca=ConfidentialClientApplicationBuilder.Create(clientIdAzure).WithAuthority(authority).WithClientSecret(_cfg["AzureAd:ClientSecret"]).WithRedirectUri(redirect).Build();
       var scopes = new[] { "openid","profile","email","offline_access","User.Read" };
-      var state=Guid.NewGuid().ToString("N"); _cache.Set($"ms_state:{state}", true, TimeSpan.FromMinutes(10));
-            //var url=await cca.GetAuthorizationRequestUrl(scopes).WithRedirectUri(redirect).WithState(state).ExecuteAsync();
-            var url = await cca.GetAuthorizationRequestUrl(scopes).WithRedirectUri(redirect).WithExtraQueryParameters(new Dictionary<string, string> { { "state", state } }).ExecuteAsync();
-            return (url.ToString(), state);
+      
+      // ✅ Enviar state codificado a Office365
+      var url = await cca.GetAuthorizationRequestUrl(scopes).WithRedirectUri(redirect).WithExtraQueryParameters(new Dictionary<string, string> { { "state", stateEncoded } }).ExecuteAsync();
+      
+      Console.WriteLine($"Azure auth URL generated with clientId: {clientId}, stateId: {stateGuid}");
+      return (url.ToString(), stateEncoded);
     }
 
     public async Task<TokenPair?> HandleCallbackAsync(string code,string state)
@@ -648,6 +667,75 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         .ToListAsync();
       
       return subscriptions;
+    }
+
+    public async Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId)
+    {
+      try
+      {
+        // ✅ Buscar la aplicación específica
+        var application = await _context.Applications
+          .FirstOrDefaultAsync(a => a.ClientId == clientId && a.IsActive && !a.IsDeleted);
+          
+        if (application == null)
+        {
+          Console.WriteLine($"Application with clientId {clientId} not found");
+          return;
+        }
+        
+        // ✅ Buscar suscripciones SOLO de esta aplicación
+        var subscriptions = await _context.NotificationSubscriptions
+          .Where(s => s.ApplicationId == application.Id && s.EventType == "Login" && s.IsActive)
+          .ToListAsync();
+        
+        if (!subscriptions.Any())
+        {
+          Console.WriteLine($"No login subscriptions found for application {clientId}");
+          return;
+        }
+        
+        // ✅ Obtener datos del usuario
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null) return;
+        
+        var roles = await GetUserRoles(userId);
+        var permissions = await GetUserPermissions(userId);
+        
+        // ✅ Crear evento específico
+        var eventData = new
+        {
+          eventType = "Login",
+          timestamp = DateTime.UtcNow,
+          context = new
+          {
+            initiatingApplication = clientId,
+            loginSource = loginType,
+            sessionScope = "specific",
+            notificationType = "targeted"
+          },
+          data = new
+          {
+            userId,
+            email = user.Email,
+            displayName = user.DisplayName,
+            loginType,
+            ipAddress,
+            roles,
+            permissions
+          }
+        };
+        
+        // ✅ Enviar webhook solo a esta aplicación
+        foreach (var subscription in subscriptions)
+        {
+          await SendWebhookAsync(subscription, eventData);
+          Console.WriteLine($"Login notification sent to {clientId} at {subscription.WebhookUrl}");
+        }
+      }
+      catch (Exception ex)
+      {
+        Console.WriteLine($"Error sending targeted login notification to {clientId}: {ex.Message}");
+      }
     }
 
     public async Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions)

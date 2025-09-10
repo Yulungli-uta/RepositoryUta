@@ -35,10 +35,19 @@ public class AuthController : ControllerBase
   }
 
   [HttpGet("azure/url")][AllowAnonymous]
-  public async Task<IActionResult> AzureUrl(){ 
-        var (url,state)=await _azure.BuildAuthUrlAsync(); 
-        Console.WriteLine($"Azure auth URL generated: {url} with state {state}");
-        return Ok(ApiResponse.Ok(new { url, state })); }
+  public async Task<IActionResult> AzureUrl([FromQuery] string? clientId = null){ 
+    Console.WriteLine($"Azure URL requested with clientId: {clientId}");
+    
+    var (url,state)=await _azure.BuildAuthUrlAsync(clientId); 
+    Console.WriteLine($"Azure auth URL generated: {url} with state {state}");
+    
+    return Ok(ApiResponse.Ok(new { 
+      url, 
+      state, 
+      clientId,
+      message = clientId != null ? $"Login will notify {clientId}" : "Login will notify all applications"
+    })); 
+  }
 
   [HttpGet("azure/callback")][AllowAnonymous]
   public async Task<IActionResult> AzureCallback([FromQuery] string code,[FromQuery] string state){
@@ -47,6 +56,26 @@ public class AuthController : ControllerBase
     // Obtener IP del cliente
     var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
     var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
+    
+    string? clientId = null;
+    
+    try
+    {
+      // ✅ Decodificar state para obtener información de la aplicación
+      var stateJson = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(state));
+      var stateData = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(stateJson);
+      
+      var stateId = stateData.GetProperty("stateId").GetString();
+      clientId = stateData.TryGetProperty("clientId", out var clientIdProp) && !clientIdProp.ValueKind.Equals(System.Text.Json.JsonValueKind.Null)
+        ? clientIdProp.GetString() 
+        : null;
+      
+      Console.WriteLine($"Extracted from state - StateId: {stateId}, ClientId: {clientId}");
+    }
+    catch (Exception ex)
+    {
+      Console.WriteLine($"Error decoding state: {ex.Message}. Proceeding without clientId.");
+    }
     
     var pair=await _azure.HandleCallbackAsync(code,state);
     
@@ -67,14 +96,22 @@ public class AuthController : ControllerBase
         {
           if (Guid.TryParse(userIdObj.ToString(), out var userId))
           {
-            // Enviar notificación de login
-            await _notificationService.NotifyLoginEventAsync(
-              userId, 
-              "Office365", 
-              clientIp, 
-              null, // roles se obtienen internamente en el servicio
-              null  // permisos se obtienen internamente en el servicio
-            );
+            if (!string.IsNullOrEmpty(clientId))
+            {
+              // ✅ Notificar SOLO a la aplicación específica
+              Console.WriteLine($"Notifying specific application: {clientId}");
+              await _notificationService.NotifyLoginEventForApplicationAsync(
+                userId, "Office365", clientIp, clientId
+              );
+            }
+            else
+            {
+              // ✅ Notificar a todas las aplicaciones (fallback)
+              Console.WriteLine("Notifying all subscribed applications");
+              await _notificationService.NotifyLoginEventAsync(
+                userId, "Office365", clientIp, null, null
+              );
+            }
             
             Console.WriteLine($"Office365 login notification sent for user {userId}");
           }
