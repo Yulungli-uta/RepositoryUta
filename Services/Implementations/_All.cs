@@ -756,12 +756,13 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
           permissions
         );
 
-        await CreateNotificationEventAsync(userId, null, "Login", eventData);
-        _logger.LogInformation("Login notification event created for user {UserId}", userId);
+        // ✅ Envío directo de notificaciones (sin cola de eventos)
+        await SendDirectNotificationsAsync("Login", eventData);
+        _logger.LogInformation("Login notification sent for user {UserId}", userId);
       }
       catch (Exception ex)
       {
-        _logger.LogError(ex, "Error creating login notification for user {UserId}", userId);
+        _logger.LogError(ex, "Error sending login notification for user {UserId}", userId);
       }
     }
 
@@ -773,12 +774,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         if (user == null) return;
 
         var eventData = new LogoutEventData(userId, user.Email, DateTime.UtcNow);
-        await CreateNotificationEventAsync(userId, null, "Logout", eventData);
-        _logger.LogInformation("Logout notification event created for user {UserId}", userId);
+        await SendDirectNotificationsAsync("Logout", eventData);
+        _logger.LogInformation("Logout notification sent for user {UserId}", userId);
       }
       catch (Exception ex)
       {
-        _logger.LogError(ex, "Error creating logout notification for user {UserId}", userId);
+        _logger.LogError(ex, "Error sending logout notification for user {UserId}", userId);
       }
     }
 
@@ -790,12 +791,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         if (user == null) return;
 
         var eventData = new UserCreatedEventData(userId, user.Email, user.DisplayName ?? "", user.UserType, user.CreatedAt);
-        await CreateNotificationEventAsync(userId, null, "UserCreated", eventData);
-        _logger.LogInformation("User created notification event created for user {UserId}", userId);
+        await SendDirectNotificationsAsync("UserCreated", eventData);
+        _logger.LogInformation("User created notification sent for user {UserId}", userId);
       }
       catch (Exception ex)
       {
-        _logger.LogError(ex, "Error creating user created notification for user {UserId}", userId);
+        _logger.LogError(ex, "Error sending user created notification for user {UserId}", userId);
       }
     }
 
@@ -803,11 +804,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     {
       var totalSubscriptions = await _context.NotificationSubscriptions.CountAsync();
       var activeSubscriptions = await _context.NotificationSubscriptions.CountAsync(s => s.IsActive);
-      var totalEvents = await _context.NotificationEvents.CountAsync();
-      var pendingEvents = await _context.NotificationEvents.CountAsync(e => !e.IsProcessed);
+      var totalLogs = await _context.NotificationLogs.CountAsync();
+      var successfulLogs = await _context.NotificationLogs.CountAsync(l => l.IsSuccess);
       var failedNotifications = await _context.NotificationLogs.CountAsync(l => !l.IsSuccess);
 
-      return new NotificationStatsDto(totalSubscriptions, activeSubscriptions, totalEvents, pendingEvents, failedNotifications);
+      return new NotificationStatsDto(totalSubscriptions, activeSubscriptions, totalLogs, successfulLogs, failedNotifications);
     }
 
     public async Task<IEnumerable<SubscriptionStatsDto>> GetSubscriptionStatsAsync(Guid applicationId)
@@ -822,7 +823,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
           _context.NotificationLogs.Count(l => l.SubscriptionId == s.Id),
           _context.NotificationLogs.Count(l => l.SubscriptionId == s.Id && l.IsSuccess),
           _context.NotificationLogs.Count(l => l.SubscriptionId == s.Id && !l.IsSuccess),
-          s.LastNotified
+          s.ModifiedAt
         ))
         .ToListAsync();
 
@@ -831,163 +832,51 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
     public async Task ProcessPendingNotificationsAsync()
     {
-      try
-      {
-        var pendingEvents = await _context.NotificationEvents
-          .Where(e => !e.IsProcessed && e.RetryCount < 3)
-          .OrderBy(e => e.CreatedAt)
-          .Take(50) // Procesar máximo 50 eventos por vez
-          .ToListAsync();
-
-        foreach (var eventItem in pendingEvents)
-        {
-          await ProcessNotificationEventAsync(eventItem);
-        }
-      }
-      catch (Exception ex)
-      {
-        _logger.LogError(ex, "Error processing pending notifications");
-      }
+      // ✅ Método simplificado - ya no hay eventos pendientes
+      // Las notificaciones se envían directamente
+      _logger.LogInformation("ProcessPendingNotificationsAsync called - notifications are now sent directly");
     }
 
-    private async Task CreateNotificationEventAsync(Guid? userId, Guid? applicationId, string eventType, object eventData)
-    {
-      var notificationEvent = new NotificationEvent
-      {
-        UserId = userId,
-        ApplicationId = applicationId,
-        EventType = eventType,
-        EventData = System.Text.Json.JsonSerializer.Serialize(eventData)
-      };
-
-      _context.NotificationEvents.Add(notificationEvent);
-      await _context.SaveChangesAsync();
-
-      // Procesar inmediatamente en background
-      _ = Task.Run(() => ProcessNotificationEventAsync(notificationEvent));
-    }
-
-    private async Task ProcessNotificationEventAsync(NotificationEvent eventItem)
+    // ✅ Método optimizado para envío directo de notificaciones
+    private async Task SendDirectNotificationsAsync(string eventType, object eventData)
     {
       try
       {
-        // Obtener suscripciones activas para este tipo de evento
         var subscriptions = await _context.NotificationSubscriptions
-          .Where(s => s.EventType == eventItem.EventType && s.IsActive)
+          .Where(s => s.EventType == eventType && s.IsActive)
           .ToListAsync();
 
         foreach (var subscription in subscriptions)
         {
-          await SendWebhookNotificationAsync(subscription, eventItem);
+          await SendWebhookAsync(subscription, eventData);
         }
-
-        // Marcar evento como procesado
-        eventItem.IsProcessed = true;
-        eventItem.ProcessedAt = DateTime.UtcNow;
-        await _context.SaveChangesAsync();
       }
       catch (Exception ex)
       {
-        _logger.LogError(ex, "Error processing notification event {EventId}", eventItem.Id);
-        
-        // Incrementar contador de reintentos
-        eventItem.RetryCount++;
-        eventItem.LastError = ex.Message;
-        await _context.SaveChangesAsync();
+        _logger.LogError(ex, "Error sending direct notifications for event type {EventType}", eventType);
       }
     }
 
-    private async Task SendWebhookNotificationAsync(NotificationSubscription subscription, NotificationEvent eventItem)
+    // ========== MÉTODOS OPTIMIZADOS SIN NotificationEvent ==========
+    
+    private async Task<IEnumerable<string>> GetUserRoles(Guid userId)
     {
-      var startTime = DateTime.UtcNow;
-      var httpClient = _httpClientFactory.CreateClient();
-      
-      try
-      {
-        // Crear payload del webhook
-        var payload = new WebhookPayload(
-          eventItem.EventType,
-          eventItem.CreatedAt,
-          System.Text.Json.JsonSerializer.Deserialize<object>(eventItem.EventData) ?? new { },
-          GenerateSignature(eventItem.EventData, subscription.SecretKey)
-        );
-
-        var jsonPayload = System.Text.Json.JsonSerializer.Serialize(payload);
-        var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
-
-        // Configurar headers
-        httpClient.Timeout = TimeSpan.FromSeconds(30);
-        if (!string.IsNullOrEmpty(subscription.SecretKey))
-        {
-          content.Headers.Add("X-Webhook-Signature", payload.Signature);
-        }
-
-        // Enviar webhook
-        var response = await httpClient.PostAsync(subscription.WebhookUrl, content);
-        var responseBody = await response.Content.ReadAsStringAsync();
-        var responseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
-
-        // Registrar log
-        var log = new NotificationLog
-        {
-          SubscriptionId = subscription.Id,
-          EventId = eventItem.Id,
-          WebhookUrl = subscription.WebhookUrl,
-          RequestPayload = jsonPayload,
-          ResponseStatusCode = (int)response.StatusCode,
-          ResponseBody = responseBody,
-          IsSuccess = response.IsSuccessStatusCode,
-          ResponseTimeMs = responseTime,
-          ErrorMessage = response.IsSuccessStatusCode ? null : $"HTTP {response.StatusCode}: {responseBody}"
-        };
-
-        _context.NotificationLogs.Add(log);
-
-        // Actualizar estadísticas de suscripción
-        if (response.IsSuccessStatusCode)
-        {
-          subscription.LastNotified = DateTime.UtcNow;
-          subscription.FailureCount = 0;
-        }
-        else
-        {
-          subscription.FailureCount++;
-          subscription.LastFailure = DateTime.UtcNow;
-          subscription.LastError = log.ErrorMessage;
-        }
-
-        await _context.SaveChangesAsync();
-
-        _logger.LogInformation("Webhook sent to {WebhookUrl} with status {StatusCode}", subscription.WebhookUrl, response.StatusCode);
-      }
-      catch (Exception ex)
-      {
-        var responseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
-        
-        // Registrar log de error
-        var errorLog = new NotificationLog
-        {
-          SubscriptionId = subscription.Id,
-          EventId = eventItem.Id,
-          WebhookUrl = subscription.WebhookUrl,
-          RequestPayload = System.Text.Json.JsonSerializer.Serialize(new { eventItem.EventType, eventItem.EventData }),
-          ResponseStatusCode = 0,
-          IsSuccess = false,
-          ResponseTimeMs = responseTime,
-          ErrorMessage = ex.Message
-        };
-
-        _context.NotificationLogs.Add(errorLog);
-
-        // Actualizar estadísticas de suscripción
-        subscription.FailureCount++;
-        subscription.LastFailure = DateTime.UtcNow;
-        subscription.LastError = ex.Message;
-
-        await _context.SaveChangesAsync();
-
-        _logger.LogError(ex, "Error sending webhook to {WebhookUrl}", subscription.WebhookUrl);
-      }
+      return await _context.UserRoles
+        .Where(ur => ur.UserId == userId && !ur.IsDeleted)
+        .Select(ur => ur.Role.Name)
+        .ToListAsync();
+    }
+    
+    private async Task<IEnumerable<object>> GetUserPermissions(Guid userId)
+    {
+      return await _context.UserRoles
+        .Where(ur => ur.UserId == userId && !ur.IsDeleted)
+        .Join(_context.RolePermissions, ur => ur.RoleId, rp => rp.RoleId, (ur, rp) => rp)
+        .Join(_context.Permissions, rp => rp.PermissionId, p => p.Id, (rp, p) => p)
+        .Where(p => !p.IsDeleted)
+        .Select(p => new { p.Id, p.Name, p.Module, p.Action, p.Description })
+        .Distinct()
+        .ToListAsync();
     }
 
     private string GenerateSignature(string payload, string? secretKey)
@@ -1000,3 +889,4 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     }
   }
 
+}

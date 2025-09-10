@@ -139,6 +139,6 @@ public record LogoutEventData(Guid UserId, string Email, DateTime LogoutTime);
 public record UserCreatedEventData(Guid UserId, string Email, string DisplayName, string UserType, DateTime CreatedAt);
 
 // Notification Management
-public record NotificationStatsDto(int TotalSubscriptions, int ActiveSubscriptions, int TotalEvents, int PendingEvents, int FailedNotifications);
-public record SubscriptionStatsDto(Guid SubscriptionId, string EventType, string WebhookUrl, bool IsActive, int TotalNotifications, int SuccessfulNotifications, int FailedNotifications, DateTime? LastNotified);
+public record NotificationStatsDto(int TotalSubscriptions, int ActiveSubscriptions, int TotalLogs, int SuccessfulLogs, int FailedNotifications);
+public record SubscriptionStatsDto(Guid SubscriptionId, string EventType, string WebhookUrl, bool IsActive, int TotalNotifications, int SuccessfulNotifications, int FailedNotifications, DateTime? LastModified);
 
