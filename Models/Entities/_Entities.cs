@@ -22,3 +22,100 @@ public class RoleChangeHistory { public long Id { get; set; } public Guid UserId
 public class PermissionChangeHistory { public long Id { get; set; } public int RoleId { get; set; } public int PermissionId { get; set; } public string ChangeType { get; set; } = "Added"; public string ChangedBy { get; set; } = string.Empty; public string? ChangeReason { get; set; } public DateTime ChangeDateTime { get; set; } = DateTime.UtcNow; public int AffectedUsersCount { get; set; } = 0; }
 public class AzureSyncLog { public long Id { get; set; } public DateTime SyncDate { get; set; } = DateTime.UtcNow; public int RecordsProcessed { get; set; } = 0; public int NewUsers { get; set; } = 0; public int UpdatedUsers { get; set; } = 0; public int Errors { get; set; } = 0; public string? Details { get; set; } public string SyncType { get; set; } = "Auto"; }
 public class HRSyncLog { public long Id { get; set; } public DateTime SyncDate { get; set; } = DateTime.UtcNow; public int RecordsProcessed { get; set; } = 0; public int NewUsers { get; set; } = 0; public int UpdatedUsers { get; set; } = 0; public int Errors { get; set; } = 0; public string? Details { get; set; } public string SyncType { get; set; } = "Auto"; }
+
+
+// ========== NUEVAS ENTIDADES PARA CENTRALIZADOR DE AUTENTICACIÓN ==========
+
+public class Application 
+{ 
+    public Guid Id { get; set; } = Guid.NewGuid(); 
+    public string Name { get; set; } = string.Empty; 
+    public string ClientId { get; set; } = string.Empty; 
+    public string ClientSecretHash { get; set; } = string.Empty; 
+    public string? Description { get; set; } 
+    public bool IsActive { get; set; } = true; 
+    public string? AllowedOrigins { get; set; } 
+    public int TokenExpirationMin { get; set; } = 60; 
+    public int RefreshTokenExpDays { get; set; } = 30; 
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public string? CreatedBy { get; set; } 
+    public DateTime LastModified { get; set; } = DateTime.UtcNow; 
+    public string? ModifiedBy { get; set; } 
+    public bool IsDeleted { get; set; } = false; 
+}
+
+public class ApplicationToken 
+{ 
+    public Guid Id { get; set; } = Guid.NewGuid(); 
+    public Guid ApplicationId { get; set; } 
+    public string TokenHash { get; set; } = string.Empty; 
+    public string TokenType { get; set; } = "Bearer"; 
+    public DateTime ExpiresAt { get; set; } 
+    public bool IsActive { get; set; } = true; 
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public string? IpAddress { get; set; } 
+    public string? UserAgent { get; set; } 
+}
+
+public class LegacyAuthLog 
+{ 
+    public long Id { get; set; } 
+    public Guid ApplicationId { get; set; } 
+    public Guid? UserId { get; set; } 
+    public string UserEmail { get; set; } = string.Empty; 
+    public string AuthResult { get; set; } = string.Empty; 
+    public string? FailureReason { get; set; } 
+    public string? IpAddress { get; set; } 
+    public string? UserAgent { get; set; } 
+    public string? RequestData { get; set; } 
+    public int? ResponseTime { get; set; } 
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+}
+
+
+// ========== ENTIDADES PARA NOTIFICACIONES DE OFFICE365 ==========
+
+public class NotificationSubscription 
+{ 
+    public Guid Id { get; set; } = Guid.NewGuid(); 
+    public Guid ApplicationId { get; set; } 
+    public string EventType { get; set; } = string.Empty; // "Login", "Logout", "UserCreated", etc.
+    public string WebhookUrl { get; set; } = string.Empty; 
+    public string? SecretKey { get; set; } // Para validar la autenticidad del webhook
+    public bool IsActive { get; set; } = true; 
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public DateTime? LastNotified { get; set; } 
+    public int FailureCount { get; set; } = 0; 
+    public DateTime? LastFailure { get; set; } 
+    public string? LastError { get; set; } 
+}
+
+public class NotificationEvent 
+{ 
+    public long Id { get; set; } 
+    public Guid? UserId { get; set; } 
+    public Guid? ApplicationId { get; set; } 
+    public string EventType { get; set; } = string.Empty; 
+    public string EventData { get; set; } = string.Empty; // JSON con datos del evento
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public bool IsProcessed { get; set; } = false; 
+    public DateTime? ProcessedAt { get; set; } 
+    public int RetryCount { get; set; } = 0; 
+    public string? LastError { get; set; } 
+}
+
+public class NotificationLog 
+{ 
+    public long Id { get; set; } 
+    public Guid SubscriptionId { get; set; } 
+    public long EventId { get; set; } 
+    public string WebhookUrl { get; set; } = string.Empty; 
+    public string RequestPayload { get; set; } = string.Empty; 
+    public int ResponseStatusCode { get; set; } 
+    public string? ResponseBody { get; set; } 
+    public bool IsSuccess { get; set; } 
+    public int ResponseTimeMs { get; set; } 
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public string? ErrorMessage { get; set; } 
+}
+

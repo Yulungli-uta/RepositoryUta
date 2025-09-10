@@ -12,7 +12,14 @@ public class AuthController : ControllerBase
 {
   private readonly IAuthService _auth;
   private readonly IAzureAuthService _azure;
-  public AuthController(IAuthService auth, IAzureAuthService azure){ _auth=auth; _azure=azure; }
+  private readonly INotificationService _notificationService;
+  
+  public AuthController(IAuthService auth, IAzureAuthService azure, INotificationService notificationService)
+  { 
+    _auth=auth; 
+    _azure=azure; 
+    _notificationService=notificationService;
+  }
 
   [HttpPost("login")][AllowAnonymous][EnableRateLimiting("login")]
   public async Task<IActionResult> Login([FromBody] LoginRequest req){
@@ -35,8 +42,51 @@ public class AuthController : ControllerBase
 
   [HttpGet("azure/callback")][AllowAnonymous]
   public async Task<IActionResult> AzureCallback([FromQuery] string code,[FromQuery] string state){
-        Console.WriteLine($"Azure callback received. Code: {code}, State: {state}");
-        var pair=await _azure.HandleCallbackAsync(code,state);
+    Console.WriteLine($"Azure callback received. Code: {code}, State: {state}");
+    
+    // Obtener IP del cliente
+    var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+    var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
+    
+    var pair=await _azure.HandleCallbackAsync(code,state);
+    
+    if (pair != null)
+    {
+      // ========== ENVIAR NOTIFICACIONES DE LOGIN OFFICE365 ==========
+      try 
+      {
+        // Extraer información del usuario del token (esto es una simplificación)
+        // En producción, podrías obtener el userId del token JWT o del contexto
+        var tokenPayload = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(
+          System.Text.Encoding.UTF8.GetString(
+            Convert.FromBase64String(pair.AccessToken.Split('.')[1] + "==")
+          )
+        );
+        
+        if (tokenPayload != null && tokenPayload.TryGetValue("sub", out var userIdObj))
+        {
+          if (Guid.TryParse(userIdObj.ToString(), out var userId))
+          {
+            // Enviar notificación de login
+            await _notificationService.NotifyLoginEventAsync(
+              userId, 
+              "Office365", 
+              clientIp, 
+              null, // roles se obtienen internamente en el servicio
+              null  // permisos se obtienen internamente en el servicio
+            );
+            
+            Console.WriteLine($"Office365 login notification sent for user {userId}");
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        // Log error pero no fallar el login
+        Console.WriteLine($"Error sending Office365 login notification: {ex.Message}");
+      }
+    }
+    
     return pair is null ? Unauthorized(ApiResponse.Fail("No autorizado")) : Ok(ApiResponse.Ok(pair));
   }
 
@@ -48,5 +98,12 @@ public class AuthController : ControllerBase
     if(!Guid.TryParse(sub,out var id)) return Unauthorized(ApiResponse.Fail("Token inválido"));
     var me=await _auth.MeAsync(id);
     return me is null ? NotFound(ApiResponse.Fail("Usuario no encontrado")) : Ok(ApiResponse.Ok(me));
+  }
+
+  [HttpPost("validate-token")][AllowAnonymous]
+  public async Task<IActionResult> ValidateToken([FromBody] ValidateTokenRequest req){
+    Console.WriteLine($"Token validation request for token: {req.Token?[..Math.Min(10, req.Token?.Length ?? 0)]}...");
+    var result = await _auth.ValidateTokenAsync(req.Token, req.ClientId);
+    return Ok(ApiResponse.Ok(result, result.IsValid ? "Token válido" : "Token inválido"));
   }
 }

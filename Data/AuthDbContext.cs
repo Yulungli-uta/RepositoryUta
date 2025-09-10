@@ -29,6 +29,16 @@ public class AuthDbContext : DbContext
     public DbSet<PermissionChangeHistory> PermissionChangeHistory => Set<PermissionChangeHistory>();
     public DbSet<AzureSyncLog> AzureSyncLogs => Set<AzureSyncLog>();
     public DbSet<HRSyncLog> HRSyncLogs => Set<HRSyncLog>();
+    
+    // ========== NUEVAS ENTIDADES PARA CENTRALIZADOR ==========
+    public DbSet<Application> Applications => Set<Application>();
+    public DbSet<ApplicationToken> ApplicationTokens => Set<ApplicationToken>();
+    public DbSet<LegacyAuthLog> LegacyAuthLogs => Set<LegacyAuthLog>();
+    
+    // ========== ENTIDADES PARA NOTIFICACIONES ==========
+    public DbSet<NotificationSubscription> NotificationSubscriptions => Set<NotificationSubscription>();
+    public DbSet<NotificationEvent> NotificationEvents => Set<NotificationEvent>();
+    public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -93,3 +93,52 @@ public record CreateAzureSyncLogDto(DateTime? SyncDate, int? RecordsProcessed, i
 public record UpdateAzureSyncLogDto(int? RecordsProcessed, int? NewUsers, int? UpdatedUsers, int? Errors, string? Details, string? SyncType);
 public record CreateHRSyncLogDto(DateTime? SyncDate, int? RecordsProcessed, int? NewUsers, int? UpdatedUsers, int? Errors, string? Details, string? SyncType);
 public record UpdateHRSyncLogDto(int? RecordsProcessed, int? NewUsers, int? UpdatedUsers, int? Errors, string? Details, string? SyncType);
+
+
+// ========== NUEVOS DTOs PARA CENTRALIZADOR DE AUTENTICACIÓN ==========
+
+// Applications
+public record CreateApplicationDto(string Name, string ClientId, string ClientSecret, string? Description, int? TokenExpirationMin, int? RefreshTokenExpDays, string? AllowedOrigins);
+public record UpdateApplicationDto(string? Name, string? Description, bool? IsActive, int? TokenExpirationMin, int? RefreshTokenExpDays, string? AllowedOrigins);
+
+// Application Tokens
+public record CreateApplicationTokenDto(Guid ApplicationId, string TokenHash, DateTime ExpiresAt, string? IpAddress, string? UserAgent);
+public record UpdateApplicationTokenDto(bool? IsActive);
+
+// Legacy Auth
+public record LegacyAuthRequest(string ClientId, string ClientSecret, string UserEmail, string Password, bool? IncludePermissions);
+public record LegacyAuthResponse(bool Success, string Message, Guid? UserId, string? Email, string? DisplayName, string? UserType, object? Roles, object? Permissions);
+
+// Token Validation
+public record ValidateTokenRequest(string Token, string? ClientId);
+public record ValidateTokenResponse(bool IsValid, string TokenType, DateTime? ExpiresAt, Guid? UserId, Guid? SessionId, string? Message);
+
+// Application Authentication
+public record AppAuthRequest(string ClientId, string ClientSecret);
+public record AppAuthResponse(bool Success, string Message, Guid? TokenId, DateTime? ExpiresAt, Guid? ApplicationId);
+
+// Legacy Auth Log
+public record CreateLegacyAuthLogDto(Guid ApplicationId, Guid? UserId, string UserEmail, string AuthResult, string? FailureReason, string? IpAddress, string? UserAgent, string? RequestData, int? ResponseTime);
+public record UpdateLegacyAuthLogDto(); // no-op, logs are immutable
+
+
+// ========== DTOs PARA NOTIFICACIONES DE OFFICE365 ==========
+
+// Notification Subscriptions
+public record CreateNotificationSubscriptionDto(Guid ApplicationId, string EventType, string WebhookUrl, string? SecretKey);
+public record UpdateNotificationSubscriptionDto(string? WebhookUrl, string? SecretKey, bool? IsActive);
+
+// Notification Events
+public record CreateNotificationEventDto(Guid? UserId, Guid? ApplicationId, string EventType, object EventData);
+public record NotificationEventDto(long Id, Guid? UserId, Guid? ApplicationId, string EventType, object EventData, DateTime CreatedAt, bool IsProcessed);
+
+// Webhook Payloads
+public record WebhookPayload(string EventType, DateTime Timestamp, object Data, string Signature);
+public record LoginEventData(Guid UserId, string Email, string DisplayName, string LoginType, string IpAddress, DateTime LoginTime, object? Roles, object? Permissions);
+public record LogoutEventData(Guid UserId, string Email, DateTime LogoutTime);
+public record UserCreatedEventData(Guid UserId, string Email, string DisplayName, string UserType, DateTime CreatedAt);
+
+// Notification Management
+public record NotificationStatsDto(int TotalSubscriptions, int ActiveSubscriptions, int TotalEvents, int PendingEvents, int FailedNotifications);
+public record SubscriptionStatsDto(Guid SubscriptionId, string EventType, string WebhookUrl, bool IsActive, int TotalNotifications, int SuccessfulNotifications, int FailedNotifications, DateTime? LastNotified);
+

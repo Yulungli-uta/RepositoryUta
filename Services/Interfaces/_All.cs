@@ -3,10 +3,19 @@ using WsSeguUta.AuthSystem.API.Models.DTOs;
 
 namespace WsSeguUta.AuthSystem.API.Services.Interfaces
 {
-  public interface IAuthService { Task<TokenPair?> LoginLocalAsync(string email,string password); Task<TokenPair?> RefreshAsync(string refreshToken); Task<bool> LogoutAsync(string refreshToken); Task<object?> MeAsync(Guid userId); }
+  public interface IAuthService { Task<TokenPair?> LoginLocalAsync(string email,string password); Task<TokenPair?> RefreshAsync(string refreshToken); Task<bool> LogoutAsync(string refreshToken); Task<object?> MeAsync(Guid userId); Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId); }
   public interface ITokenService { string Create(Guid userId,string email,IEnumerable<string> roles); string Hash(string input); }
   public interface IAzureAuthService { Task<(string Url,string State)> BuildAuthUrlAsync(); Task<TokenPair?> HandleCallbackAsync(string code,string state); }
   public interface IMenuService { Task<IEnumerable<object>> GetMenuForUserAsync(Guid userId); }
+  
+  // ========== NUEVAS INTERFACES PARA CENTRALIZADOR ==========
+  public interface IAppAuthService 
+  { 
+    Task<AppAuthResponse> AuthenticateApplicationAsync(string clientId, string clientSecret, string? ipAddress, string? userAgent);
+    Task<LegacyAuthResponse> AuthenticateUserLegacyAsync(string clientId, string clientSecret, string userEmail, string password, bool includePermissions, string? ipAddress, string? userAgent);
+    Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId);
+    Task<object?> GetApplicationStatsAsync(string clientId);
+  }
 
   // CRUD genÃ©rico para todas las entidades
   public interface ICrudService<TEntity, TCreate, TUpdate> where TEntity: class
@@ -18,3 +27,20 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task<bool> DeleteAsync(params object[] key);
   }
 }
+
+  
+  // ========== INTERFAZ PARA NOTIFICACIONES ==========
+  public interface INotificationService 
+  { 
+    Task<Guid> CreateSubscriptionAsync(Guid applicationId, string eventType, string webhookUrl, string? secretKey);
+    Task<bool> UpdateSubscriptionAsync(Guid subscriptionId, string? webhookUrl, string? secretKey, bool? isActive);
+    Task<bool> DeleteSubscriptionAsync(Guid subscriptionId);
+    Task<IEnumerable<NotificationSubscription>> GetSubscriptionsByApplicationAsync(Guid applicationId);
+    Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions);
+    Task NotifyLogoutEventAsync(Guid userId);
+    Task NotifyUserCreatedEventAsync(Guid userId);
+    Task<NotificationStatsDto> GetNotificationStatsAsync();
+    Task<IEnumerable<SubscriptionStatsDto>> GetSubscriptionStatsAsync(Guid applicationId);
+    Task ProcessPendingNotificationsAsync();
+  }
+

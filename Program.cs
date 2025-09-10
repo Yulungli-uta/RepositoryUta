@@ -138,6 +138,8 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAzureAuthService, AzureAuthService>();
 builder.Services.AddScoped<IMenuService, MenuService>();
+builder.Services.AddScoped<IAppAuthService, AppAuthService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 // CRUD genÃ©rico (todas las tablas)
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
