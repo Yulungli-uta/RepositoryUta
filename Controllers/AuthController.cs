@@ -103,6 +103,12 @@ public class AuthController : ControllerBase
   [HttpPost("validate-token")][AllowAnonymous]
   public async Task<IActionResult> ValidateToken([FromBody] ValidateTokenRequest req){
     Console.WriteLine($"Token validation request for token: {req.Token?[..Math.Min(10, req.Token?.Length ?? 0)]}...");
+    
+    if (string.IsNullOrEmpty(req.Token))
+    {
+      return BadRequest(ApiResponse.Fail("Token is required"));
+    }
+    
     var result = await _auth.ValidateTokenAsync(req.Token, req.ClientId);
     return Ok(ApiResponse.Ok(result, result.IsValid ? "Token válido" : "Token inválido"));
   }

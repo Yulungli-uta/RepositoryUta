@@ -23,10 +23,18 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
   public class AuthService : IAuthService
   {
-    private readonly IUserRepository _users; private readonly IAuthRepository _auth; private readonly ITokenService _tokens;
+    private readonly IUserRepository _users; 
+    private readonly IAuthRepository _auth; 
+    private readonly ITokenService _tokens;
+    private readonly AuthDbContext _context;
 
-    public AuthService(IUserRepository users,IAuthRepository auth,ITokenService tokens)
-    { _users=users; _auth=auth; _tokens=tokens; }
+    public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context)
+    { 
+      _users = users; 
+      _auth = auth; 
+      _tokens = tokens; 
+      _context = context;
+    }
 
     public async Task<TokenPair?> LoginLocalAsync(string email,string password)
     {
@@ -117,7 +125,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         // Intentar parsear como GUID (token de sesión)
         if (Guid.TryParse(token, out var tokenGuid))
         {
-          var session = await _auth.GetActiveSessionAsync(tokenGuid);
+          var session = await _context.UserSessions
+            .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > DateTime.UtcNow);
           if (session != null)
           {
             return new ValidateTokenResponse(true, "User token", session.ExpiresAt, session.UserId, session.SessionId, "Token is valid");
@@ -412,8 +421,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             .Where(ur => ur.UserId == user.Id && !ur.IsDeleted && 
                         (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .Join(_context.RolePermissions, ur => ur.RoleId, rp => rp.RoleId, (ur, rp) => rp)
-            .Join(_context.Permissions, rp => rp.PermissionId, p => p.Id, (rp, p) => new { p.Id, p.Name, p.Module, p.Action, p.Description })
+            .Join(_context.Permissions, rp => rp.PermissionId, p => p.Id, (rp, p) => p)
             .Where(p => !p.IsDeleted)
+            .Select(p => new { p.Id, p.Name, p.Module, p.Action, p.Description })
             .Distinct()
             .ToListAsync();
 
