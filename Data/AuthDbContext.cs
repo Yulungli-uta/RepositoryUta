@@ -65,6 +65,10 @@ public class AuthDbContext : DbContext
         modelBuilder.ApplyConfiguration(new PermissionChangeHistoryConfiguration());
         modelBuilder.ApplyConfiguration(new AzureSyncLogConfiguration());
         modelBuilder.ApplyConfiguration(new HRSyncLogConfiguration());
+        modelBuilder.ApplyConfiguration(new ApplicationConfiguration());
+        modelBuilder.ApplyConfiguration(new NotificationSubscriptionConfiguration());
+        modelBuilder.ApplyConfiguration(new NotificationLogConfiguration());
+
 
 
         modelBuilder.Entity<LocalUserCredential>(e =>

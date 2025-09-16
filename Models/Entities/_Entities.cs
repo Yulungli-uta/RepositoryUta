@@ -36,7 +36,7 @@ public class Application
     public bool IsActive { get; set; } = true; 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
     public string? CreatedBy { get; set; } 
-    public DateTime LastModified { get; set; } = DateTime.UtcNow; 
+    public DateTime? ModifiedAt { get; set; } = DateTime.UtcNow; 
     public string? ModifiedBy { get; set; } 
     public bool IsDeleted { get; set; } = false; 
 }
