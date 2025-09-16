@@ -63,8 +63,11 @@ public class NotificationSubscription
     public Guid Id { get; set; } = Guid.NewGuid(); 
     public Guid ApplicationId { get; set; } 
     public string EventType { get; set; } = string.Empty; // "Login", "Logout", "UserCreated", etc.
-    public string WebhookUrl { get; set; } = string.Empty; 
+    public string? WebhookUrl { get; set; } // Opcional para WebSockets
     public string? SecretKey { get; set; } // Para validar la autenticidad del webhook con HMAC
+    public string NotificationType { get; set; } = "webhook"; // "webhook", "websocket", "both"
+    public string? WebSocketGroupName { get; set; } // Para agrupar conexiones WebSocket
+    public bool RequireAuthentication { get; set; } = true; // Si requiere autenticación para WebSocket
     public bool IsActive { get; set; } = true; 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
     public string? CreatedBy { get; set; }
@@ -84,6 +87,49 @@ public class NotificationLog
     public int? ResponseTime { get; set; } // en milisegundos
     public bool IsSuccess { get; set; } = false; 
     public string? ErrorMessage { get; set; } 
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+}
+
+
+// ========== NUEVAS ENTIDADES PARA WEBSOCKETS HÍBRIDOS ==========
+
+public class WebSocketConnection 
+{ 
+    public Guid Id { get; set; } = Guid.NewGuid(); 
+    public Guid ApplicationId { get; set; } 
+    public string ConnectionId { get; set; } = string.Empty; 
+    public Guid? UserId { get; set; } // NULL si es conexión anónima
+    public string? ClientInfo { get; set; } // Browser, IP, User-Agent, etc.
+    public DateTime ConnectedAt { get; set; } = DateTime.UtcNow; 
+    public DateTime? LastPingAt { get; set; } 
+    public DateTime? DisconnectedAt { get; set; } 
+    public bool IsActive { get; set; } = true; 
+}
+
+public class WebSocketMessage 
+{ 
+    public long Id { get; set; } 
+    public string ConnectionId { get; set; } = string.Empty; 
+    public string EventType { get; set; } = string.Empty; 
+    public string MessageData { get; set; } = string.Empty; 
+    public DateTime SentAt { get; set; } = DateTime.UtcNow; 
+    public bool IsDelivered { get; set; } = false; 
+    public DateTime? DeliveredAt { get; set; } 
+    public string? ErrorMessage { get; set; } 
+    public int RetryCount { get; set; } = 0; 
+}
+
+public class WebSocketStats 
+{ 
+    public long Id { get; set; } 
+    public Guid ApplicationId { get; set; } 
+    public DateTime Date { get; set; } 
+    public int TotalConnections { get; set; } = 0; 
+    public int PeakConnections { get; set; } = 0; 
+    public int TotalMessages { get; set; } = 0; 
+    public int SuccessfulMessages { get; set; } = 0; 
+    public int FailedMessages { get; set; } = 0; 
+    public int? AverageConnectionDuration { get; set; } // en minutos
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
 }
 

@@ -140,6 +140,15 @@ builder.Services.AddScoped<IAzureAuthService, AzureAuthService>();
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<IAppAuthService, AppAuthService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IWebSocketConnectionService, WebSocketConnectionService>();
+
+// SignalR para notificaciones en tiempo real
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true;
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+});
 
 // CRUD genÃ©rico (todas las tablas)
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
@@ -159,4 +168,5 @@ app.UseSwagger();
 app.UseSwaggerUI();
 app.MapControllers();
 app.MapHealthChecks("/healthz");
+app.MapHub<WsSeguUta.AuthSystem.API.Hubs.NotificationHub>("/notificationHub");
 app.Run();

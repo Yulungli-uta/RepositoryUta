@@ -34,6 +34,18 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task ProcessPendingNotificationsAsync();
   }
 
+  // ========== INTERFAZ PARA WEBSOCKETS ==========
+  public interface IWebSocketConnectionService
+  {
+    Task RegisterConnectionAsync(string connectionId, string clientId, string? userId = null);
+    Task UnregisterConnectionAsync(string connectionId);
+    Task<IEnumerable<string>> GetActiveConnectionsForApplicationAsync(string clientId);
+    Task<bool> IsConnectionActiveAsync(string connectionId);
+    Task UpdateLastPingAsync(string connectionId);
+    Task<int> GetActiveConnectionCountAsync(string clientId);
+    Task CleanupInactiveConnectionsAsync(int inactiveMinutes = 60);
+  }
+
   // CRUD genérico para todas las entidades
   public interface ICrudService<TEntity, TCreate, TUpdate> where TEntity: class
   {

@@ -35,6 +35,11 @@ public class AuthDbContext : DbContext
     public DbSet<LegacyAuthLog> LegacyAuthLogs => Set<LegacyAuthLog>();
     public DbSet<NotificationSubscription> NotificationSubscriptions => Set<NotificationSubscription>();
     public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
+    
+    // ========== ENTIDADES PARA WEBSOCKETS HÍBRIDOS ==========
+    public DbSet<WebSocketConnection> WebSocketConnections => Set<WebSocketConnection>();
+    public DbSet<WebSocketMessage> WebSocketMessages => Set<WebSocketMessage>();
+    public DbSet<WebSocketStats> WebSocketStats => Set<WebSocketStats>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
