@@ -178,13 +178,17 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
             var stateJson = System.Text.Json.JsonSerializer.Serialize(stateData);
             var stateEncoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(stateJson));
-
+            //Console.WriteLine($"********************codigo:  {stateEncoded}");
             // ✅ Guardar en cache para validación
             _cache.Set($"ms_state:{stateGuid}", stateData, TimeSpan.FromMinutes(10));
 
-            var tenant = _cfg["AzureAd:TenantId"]; var clientIdAzure = _cfg["AzureAd:ClientId"]; var authority = $"https://login.microsoftonline.com/{tenant}/v2.0"; var redirect = _cfg["AzureAd:RedirectUri"]!;
+            var tenant = _cfg["AzureAd:TenantId"]; 
+            var clientIdAzure = _cfg["AzureAd:ClientId"]; 
+            var authority = $"https://login.microsoftonline.com/{tenant}/v2.0"; var redirect = _cfg["AzureAd:RedirectUri"]!;
             var cca = ConfidentialClientApplicationBuilder.Create(clientIdAzure).WithAuthority(authority).WithClientSecret(_cfg["AzureAd:ClientSecret"]).WithRedirectUri(redirect).Build();
-            var scopes = new[] { "openid", "profile", "email", "offline_access", "User.Read" };
+            var scopes = new[] { "openid", "profile", "email", "offline_access", "User.Read" };           
+                        //"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"};
+            //Console.WriteLine($"******************************clientIdAzure: {clientIdAzure}, authority: {authority}, redirect: {redirect}");
 
             // ✅ Enviar state codificado a Office365
             var url = await cca.GetAuthorizationRequestUrl(scopes).WithRedirectUri(redirect).WithExtraQueryParameters(new Dictionary<string, string> { { "state", stateEncoded } }).ExecuteAsync();
@@ -195,25 +199,40 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         public async Task<TokenPair?> HandleCallbackAsync(string code, string state)
         {
-            if (!_cache.TryGetValue($"ms_state:{state}", out _)) return null;
+            Console.WriteLine($"*****************HandleCallbackAsync Azure callback with code: {code}, state: {state}");
+            //Console.WriteLine($"*****************State received: {state}");
+            //Console.WriteLine($"*****************varlor obenido de cache{_cache.TryGetValue($"ms_state:{state}", out _)}");
+            // Decodificar el state para obtener el stateId
+            var stateBytes = Convert.FromBase64String(state);
+            var stateJson = System.Text.Encoding.UTF8.GetString(stateBytes);
+            var stateData = System.Text.Json.JsonSerializer.Deserialize<dynamic>(stateJson);
+            string stateId = stateData.GetProperty("stateId").GetString();
+            //Console.WriteLine($"*****************Extracted stateId: {stateId}");
+            if (!_cache.TryGetValue($"ms_state:{stateId}", out _)) return null;
             var tenant = _cfg["AzureAd:TenantId"]; var clientId = _cfg["AzureAd:ClientId"]; var authority = $"https://login.microsoftonline.com/{tenant}/v2.0"; var redirect = _cfg["AzureAd:RedirectUri"]!;
             var cca = ConfidentialClientApplicationBuilder.Create(clientId).WithAuthority(authority).WithClientSecret(_cfg["AzureAd:ClientSecret"]).WithRedirectUri(redirect).Build();
             var scopes = new[] { "openid", "profile", "email", "offline_access", "User.Read" };
             var result = await cca.AcquireTokenByAuthorizationCode(scopes, code).ExecuteAsync();
+            //Console.WriteLine($"*****************Token acquired from Azure. Expires on: {result.ExpiresOn}");
 
-            var client = _http.CreateClient(); client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", result.AccessToken);
+            var client = _http.CreateClient(); 
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", result.AccessToken);
             var res = await client.GetAsync("https://graph.microsoft.com/v1.0/me"); res.EnsureSuccessStatusCode();
             var json = await res.Content.ReadAsStringAsync();
+            Console.WriteLine($"*****************User info from Graph API: {json}");
             var email = System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("userPrincipalName").GetString() ?? "";
-
+            Console.WriteLine($"*****************User email from Graph API: {email}");
             var user = await _users.FindByEmailAsync(email);
+            Console.WriteLine($"*****************User found in local DB: {user != null},{user.Id},{user.Email},{user.UserType}");
             if (user is null) return null; // aquí puedes auto-provisionar si deseas
 
             var roles = await _users.GetRolesAsync(user.Id);
             var access = _tokens.Create(user.Id, email, roles);
+            Console.WriteLine($"****************Access token created for {email}: {access}");
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+            Console.WriteLine($"****************Refresh token created for {email}: {refresh}");
             var refreshHash = _tokens.Hash(refresh);
-            var exp = DateTime.UtcNow.AddDays(7);
+            var exp = DateTime.Now.AddDays(7);
             var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, exp, null, null);
 
             // ========== NOTIFICAR LOGIN CON OFFICE365 ==========
@@ -672,6 +691,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         {
             try
             {
+                Console.WriteLine($"****************NotifyLoginEventForApplicationAsync called for user {userId} with loginType {loginType} for application {clientId}");
                 // ✅ Buscar la aplicación específica
                 var application = await _context.Applications
                   .FirstOrDefaultAsync(a => a.ClientId == clientId && a.IsActive && !a.IsDeleted);
@@ -689,7 +709,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
                 if (!subscriptions.Any())
                 {
-                    Console.WriteLine($"No login subscriptions found for application {clientId}");
+                    //Console.WriteLine($"No login subscriptions found for application {clientId}");
                     return;
                 }
 
@@ -733,7 +753,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error sending targeted login notification to {clientId}: {ex.Message}");
+                //Console.WriteLine($"Error sending targeted login notification to {clientId}: {ex.Message}");
             }
         }
 
@@ -741,6 +761,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         {
             try
             {
+                Console.WriteLine($"****************NotifyLoginEventAsync called for user {userId} with loginType {loginType}");
                 var user = await _context.Users.FindAsync(userId);
                 if (user == null) return;
 
@@ -755,6 +776,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                   permissions
                 );
 
+                Console.WriteLine($"valores json enviado en notificaicon: {eventData}");
                 // ✅ Envío directo de notificaciones (sin cola de eventos)
                 await SendDirectNotificationsAsync("Login", eventData);
                 _logger.LogInformation("Login notification sent for user {UserId}", userId);
@@ -865,11 +887,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
             try
             {
+                //Console.WriteLine("*******************entro a SendWebhookAsync");
+                _logger.LogInformation("********************* entro a SendWebhookAsync");
                 var jsonPayload = System.Text.Json.JsonSerializer.Serialize(eventData);
                 var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
 
                 // Configurar headers y timeout
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
+                _logger.LogInformation($"********************* aplicationid: {subscription.ApplicationId}," +
+                    $"web hook url: {subscription.WebhookUrl}");
                 if (!string.IsNullOrEmpty(subscription.SecretKey))
                 {
                     var signature = GenerateSignature(jsonPayload, subscription.SecretKey);

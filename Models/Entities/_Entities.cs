@@ -36,7 +36,7 @@ public class Application
     public bool IsActive { get; set; } = true; 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
     public string? CreatedBy { get; set; } 
-    public DateTime LastModified { get; set; } = DateTime.UtcNow; 
+    public DateTime? ModifiedAt { get; set; } = DateTime.UtcNow; 
     public string? ModifiedBy { get; set; } 
     public bool IsDeleted { get; set; } = false; 
 }
@@ -85,5 +85,13 @@ public class NotificationLog
     public bool IsSuccess { get; set; } = false; 
     public string? ErrorMessage { get; set; } 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+}
+
+public class OAuthState
+{
+    public string stateId { get; set; }
+    public string? clientId { get; set; }
+    public string timestamp { get; set; }
+    public string source { get; set; }
 }
 
