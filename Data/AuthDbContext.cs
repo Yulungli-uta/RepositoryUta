@@ -68,6 +68,7 @@ public class AuthDbContext : DbContext
         modelBuilder.ApplyConfiguration(new ApplicationConfiguration());
         modelBuilder.ApplyConfiguration(new NotificationSubscriptionConfiguration());
         modelBuilder.ApplyConfiguration(new NotificationLogConfiguration());
+        modelBuilder.ApplyConfiguration(new WebSocketConnectionsConfiguration());
 
 
 

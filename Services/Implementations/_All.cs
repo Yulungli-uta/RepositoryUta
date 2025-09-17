@@ -197,8 +197,21 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
     public async Task<TokenPair?> HandleCallbackAsync(string code,string state)
     {
-      if(!_cache.TryGetValue($"ms_state:{state}", out _)) return null;
-      var tenant=_cfg["AzureAd:TenantId"]; var clientId=_cfg["AzureAd:ClientId"]; var authority=$"https://login.microsoftonline.com/{tenant}/v2.0"; var redirect=_cfg["AzureAd:RedirectUri"]!;
+    var stateJson = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(state));
+    var stateData = System.Text.Json.JsonDocument.Parse(stateJson).RootElement;
+    var stateId = stateData.GetProperty("stateId").GetString();
+    Console.WriteLine($"*****************Handling Azure callback with statejson: {stateJson}, " +
+        $" statedata: {stateData}. stateId: {stateId}");
+    
+
+            // Validar state
+            Console.WriteLine($"*****************Handling Azure callback with state: {state}, " +
+          $"if: {!_cache.TryGetValue($"ms_state:{state}", out _)}");
+      if (!_cache.TryGetValue($"ms_state:{stateId}", out _)) return null;
+      var tenant=_cfg["AzureAd:TenantId"]; 
+      var clientId=_cfg["AzureAd:ClientId"]; 
+      var authority=$"https://login.microsoftonline.com/{tenant}/v2.0"; 
+      var redirect=_cfg["AzureAd:RedirectUri"]!;
       var cca=ConfidentialClientApplicationBuilder.Create(clientId).WithAuthority(authority).WithClientSecret(_cfg["AzureAd:ClientSecret"]).WithRedirectUri(redirect).Build();
       var scopes=new[]{"openid","profile","email","offline_access","User.Read"};
       var result=await cca.AcquireTokenByAuthorizationCode(scopes, code).ExecuteAsync();
@@ -207,9 +220,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       var res=await client.GetAsync("https://graph.microsoft.com/v1.0/me"); res.EnsureSuccessStatusCode();
       var json = await res.Content.ReadAsStringAsync();
       var email = System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("userPrincipalName").GetString() ?? "";
-
+      Console.WriteLine($"*****************Azure user email: {email}, client: {client}, res: {res}, ");
+            
       var user = await _users.FindByEmailAsync(email);
-      if (user is null) return null; // aquí puedes auto-provisionar si deseas
+      Console.WriteLine($"User found in local DB: {user != null}");
+            if (user is null) return null; // aquí puedes auto-provisionar si deseas
       
       var roles = await _users.GetRolesAsync(user.Id);
       var access = _tokens.Create(user.Id, email, roles);
@@ -712,10 +727,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
           switch (subscription.NotificationType?.ToLower())
           {
             case "webhook":
-              await SendWebhookNotification(subscription, eventData);
+                Console.WriteLine($"*************Webhook --- EventData {eventData}, ClientId: {clientId}");
+                await SendWebhookNotification(subscription, eventData);
               break;
               
             case "websocket":
+                            Console.WriteLine($"*************Websocket ---EventData {eventData}, ClientId: {clientId}");
               await SendWebSocketNotification(subscription, eventData, clientId);
               break;
               

@@ -67,7 +67,7 @@ public class NotificationSubscription
     public string? SecretKey { get; set; } // Para validar la autenticidad del webhook con HMAC
     public string NotificationType { get; set; } = "webhook"; // "webhook", "websocket", "both"
     public string? WebSocketGroupName { get; set; } // Para agrupar conexiones WebSocket
-    public bool RequireAuthentication { get; set; } = true; // Si requiere autenticación para WebSocket
+    public bool? RequireAuthentication { get; set; } = true; // Si requiere autenticación para WebSocket
     public bool IsActive { get; set; } = true; 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
     public string? CreatedBy { get; set; }
@@ -81,7 +81,7 @@ public class NotificationLog
     public Guid SubscriptionId { get; set; } 
     public string EventType { get; set; } = string.Empty; 
     public Guid? UserId { get; set; } 
-    public string WebhookUrl { get; set; } = string.Empty; 
+    public string? WebhookUrl { get; set; } = string.Empty; 
     public int? HttpStatusCode { get; set; } 
     public string? ResponseBody { get; set; } 
     public int? ResponseTime { get; set; } // en milisegundos
@@ -99,7 +99,7 @@ public class WebSocketConnection
     public Guid ApplicationId { get; set; } 
     public string ConnectionId { get; set; } = string.Empty; 
     public Guid? UserId { get; set; } // NULL si es conexión anónima
-    public string? ClientInfo { get; set; } // Browser, IP, User-Agent, etc.
+    //public string? ClientInfo { get; set; } // Browser, IP, User-Agent, etc.
     public DateTime ConnectedAt { get; set; } = DateTime.UtcNow; 
     public DateTime? LastPingAt { get; set; } 
     public DateTime? DisconnectedAt { get; set; } 

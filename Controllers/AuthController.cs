@@ -89,7 +89,7 @@ public class AuthController : ControllerBase
         }
 
         var pair = await _azure.HandleCallbackAsync(code, state);
-        //Console.WriteLine($"******************Azure login processed. pair: {pair}, TokenPair: {(pair != null ? "Success" : "Failed")}");
+        Console.WriteLine($"******************Azure login processed. pair: {pair}, TokenPair: {(pair != null ? "Success" : "Failed")}");
 
         if (pair != null)
         {
@@ -112,9 +112,9 @@ public class AuthController : ControllerBase
                     //return Ok(ApiResponse.Ok(pair));
                 }
 
-                //Console.WriteLine($"***************Token header: {tokenParts[0]}");
-                //Console.WriteLine($"***************Token payload (base64): {tokenParts[1]}");
-                //Console.WriteLine($"***************Token signature: {tokenParts[2].Substring(0, Math.Min(20, tokenParts[2].Length))}...");
+                Console.WriteLine($"***************Token header: {tokenParts[0]}");
+                Console.WriteLine($"***************Token payload (base64): {tokenParts[1]}");
+                Console.WriteLine($"***************Token signature: {tokenParts[2].Substring(0, Math.Min(20, tokenParts[2].Length))}...");
 
                 // Agregar padding si es necesario para el Base64
                 var payloadBase64 = tokenParts[1];
@@ -141,18 +141,18 @@ public class AuthController : ControllerBase
                 }
 
                 var payloadJson = System.Text.Encoding.UTF8.GetString(payloadBytes);
-                //Console.WriteLine($"***************Payload JSON: {payloadJson}");
+                Console.WriteLine($"***************Payload JSON: {payloadJson}");
 
                 // Deserializar el payload
                 Dictionary<string, object>? tokenPayload = null;
                 try
                 {
                     tokenPayload = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(payloadJson);
-                    //Console.WriteLine($"***************Payload deserialized successfully. Keys count: {tokenPayload?.Count ?? 0}");
+                    Console.WriteLine($"***************Payload deserialized successfully. Keys count: {tokenPayload?.Count ?? 0}");
 
                     if (tokenPayload != null)
                     {
-                        //Console.WriteLine("***************Available keys in token payload:");
+                        Console.WriteLine("***************Available keys in token payload:");
                         foreach (var kvp in tokenPayload)
                         {
                             var valuePreview = kvp.Value?.ToString();
@@ -174,7 +174,7 @@ public class AuthController : ControllerBase
                     var possibleUserIdFields = new[] { "sub", "oid", "unique_name", "upn", "email", "preferred_username", // };
                                             "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"};
 
-                    //Console.WriteLine($"***************Searching for user ID in token payload...");
+                    Console.WriteLine($"***************Searching for user ID in token payload...");
 
                     string? foundUserId = null;
                     string? foundUserIdField = null;

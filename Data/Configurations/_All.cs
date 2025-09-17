@@ -84,5 +84,15 @@ namespace WsSeguUta.AuthSystem.API.Data.Configurations
             //b.HasIndex(x => x.ClientId);
         }
     }
- 
+
+    public class WebSocketConnectionsConfiguration : IEntityTypeConfiguration<WebSocketConnection>
+    {
+        public void Configure(EntityTypeBuilder<WebSocketConnection> b)
+        {
+            b.ToTable("tbl_WebSocketConnections", "auth");
+            b.HasKey(x => x.Id);
+            //b.HasIndex(x => x.ClientId);
+        }
+    }
+
 }
