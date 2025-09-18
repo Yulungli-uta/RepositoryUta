@@ -32,8 +32,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task<bool> UpdateSubscriptionAsync(Guid subscriptionId, string? webhookUrl, string? secretKey, bool? isActive);
     Task<bool> DeleteSubscriptionAsync(Guid subscriptionId);
     Task<IEnumerable<NotificationSubscription>> GetSubscriptionsByApplicationAsync(Guid applicationId);
-    Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions);
-    Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId);
+    Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions, TokenPair? pair);
+    Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair);
     Task NotifyLogoutEventAsync(Guid userId);
     Task NotifyUserCreatedEventAsync(Guid userId);
     Task<NotificationStatsDto> GetNotificationStatsAsync();

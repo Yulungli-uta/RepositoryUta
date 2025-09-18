@@ -204,9 +204,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         $" statedata: {stateData}. stateId: {stateId}");
     
 
-            // Validar state
-            Console.WriteLine($"*****************Handling Azure callback with state: {state}, " +
-          $"if: {!_cache.TryGetValue($"ms_state:{state}", out _)}");
+    // Validar state
+    //Console.WriteLine($"*****************Handling Azure callback with state: {state}, " +
+    //      $"if: {!_cache.TryGetValue($"ms_state:{state}", out _)}");
       if (!_cache.TryGetValue($"ms_state:{stateId}", out _)) return null;
       var tenant=_cfg["AzureAd:TenantId"]; 
       var clientId=_cfg["AzureAd:ClientId"]; 
@@ -220,7 +220,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       var res=await client.GetAsync("https://graph.microsoft.com/v1.0/me"); res.EnsureSuccessStatusCode();
       var json = await res.Content.ReadAsStringAsync();
       var email = System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("userPrincipalName").GetString() ?? "";
-      Console.WriteLine($"*****************Azure user email: {email}, client: {client}, res: {res}, ");
+      //Console.WriteLine($"*****************Azure user email: {email}, client: {client}, res: {res}, ");
             
       var user = await _users.FindByEmailAsync(email);
       Console.WriteLine($"User found in local DB: {user != null}");
@@ -692,7 +692,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       return subscriptions;
     }
 
-    public async Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId)
+    public async Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair)
     {
       try
       {
@@ -718,7 +718,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         }
         
         // ✅ Preparar datos del evento UNA SOLA VEZ
-        var eventData = await PrepareLoginEventData(userId, loginType, ipAddress, clientId);
+        var eventData = await PrepareLoginEventData(userId, loginType, ipAddress, clientId, pair);
         if (eventData == null) return;
         
         // ✅ Procesar cada suscripción según su tipo
@@ -732,7 +732,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
               break;
               
             case "websocket":
-                            Console.WriteLine($"*************Websocket ---EventData {eventData}, ClientId: {clientId}");
+                Console.WriteLine($"*************Websocket ---EventData {eventData}, ClientId: {clientId}");
               await SendWebSocketNotification(subscription, eventData, clientId);
               break;
               
@@ -754,7 +754,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     }
 
     // ✅ Método reutilizable para preparar datos del evento
-    private async Task<object?> PrepareLoginEventData(Guid userId, string loginType, string? ipAddress, string clientId)
+    private async Task<object?> PrepareLoginEventData(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair)
     {
       try
       {
@@ -784,7 +784,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             ipAddress,
             roles,
             permissions
-          }
+          },
+          pair = pair // Incluir tokens si están disponibles
         };
       }
       catch (Exception ex)
@@ -810,7 +811,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       
       try
       {
-        // Enviar por SignalR a todos los clientes conectados de esta aplicación
+        Console.WriteLine($"*****************Sending WebSocket notification to application {clientId} with eventData: {eventData}");
+                // Enviar por SignalR a todos los clientes conectados de esta aplicación
         if (_hubContext != null)
         {
           await _hubContext.Clients.Group($"app_{clientId}")
@@ -826,8 +828,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
           HttpStatusCode = 200, // Exitoso
           ResponseBody = "delivered",
           IsSuccess = true,
-          ResponseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds,
-          CreatedAt = DateTime.UtcNow
+          ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
+          CreatedAt = DateTime.Now
         };
 
         _context.NotificationLogs.Add(log);
@@ -857,14 +859,14 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       }
     }
 
-    public async Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions)
+    public async Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions, TokenPair? pair)
     {
       try
       {
         var user = await _context.Users.FindAsync(userId);
         if (user == null) return;
 
-        var eventData = new LoginEventData(
+        var eventData = new LoginEventData(           
           userId, 
           user.Email, 
           user.DisplayName ?? "", 
@@ -872,7 +874,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
           ipAddress ?? "", 
           DateTime.UtcNow, 
           roles, 
-          permissions
+          permissions,
+          pair = pair
         );
 
         // ✅ Envío directo de notificaciones (sin cola de eventos)

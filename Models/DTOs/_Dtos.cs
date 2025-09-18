@@ -134,7 +134,7 @@ public record NotificationEventDto(long Id, Guid? UserId, Guid? ApplicationId, s
 
 // Webhook Payloads
 public record WebhookPayload(string EventType, DateTime Timestamp, object Data, string Signature);
-public record LoginEventData(Guid UserId, string Email, string DisplayName, string LoginType, string IpAddress, DateTime LoginTime, object? Roles, object? Permissions);
+public record LoginEventData(Guid UserId, string Email, string DisplayName, string LoginType, string IpAddress, DateTime LoginTime, object? Roles, object? Permissions, TokenPair? pair);
 public record LogoutEventData(Guid UserId, string Email, DateTime LogoutTime);
 public record UserCreatedEventData(Guid UserId, string Email, string DisplayName, string UserType, DateTime CreatedAt);
 

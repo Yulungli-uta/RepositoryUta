@@ -28,6 +28,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
         {
             try
             {
+                Console.WriteLine($"*******************Client {Context.ConnectionId} joining group for application {clientId} with user {userId ?? "anonymous"}");
                 // Unirse al grupo de la aplicación
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"app_{clientId}");
                 
