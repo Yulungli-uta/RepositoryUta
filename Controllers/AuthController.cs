@@ -270,4 +270,26 @@ public class AuthController : ControllerBase
         var result = await _auth.ValidateTokenAsync(req.Token, req.ClientId);
         return Ok(ApiResponse.Ok(result, result.IsValid ? "Token válido" : "Token inválido"));
     }
+
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest req)
+    {
+        var sub = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(sub, out var userId))
+            return Unauthorized(ApiResponse.Fail("Token inválido"));
+
+        if (string.IsNullOrWhiteSpace(req.CurrentPassword) || string.IsNullOrWhiteSpace(req.NewPassword))
+            return BadRequest(ApiResponse.Fail("Las contraseñas son requeridas"));
+
+        if (req.NewPassword.Length < 8)
+            return BadRequest(ApiResponse.Fail("La nueva contraseña debe tener al menos 8 caracteres"));
+
+        var success = await _auth.ChangePasswordAsync(userId, req.CurrentPassword, req.NewPassword);
+        
+        if (!success)
+            return BadRequest(ApiResponse.Fail("No se pudo cambiar la contraseña. Verifique que la contraseña actual sea correcta y que sea un usuario local."));
+
+        return Ok(ApiResponse.Ok(new ChangePasswordResponse(true, "Contraseña cambiada exitosamente")));
+    }
 }

@@ -142,6 +142,50 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         return new ValidateTokenResponse(false, "Unknown", null, null, null, "Error validating token");
       }
     }
+
+    public async Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword)
+    {
+      // Validar que el usuario existe y es de tipo Local
+      var user = await _users.FindByIdAsync(userId);
+      if (user is null || !user.IsActive || !string.Equals(user.UserType, "Local", StringComparison.OrdinalIgnoreCase))
+        return false;
+
+      // Obtener credenciales locales
+      var cred = await _users.GetLocalCredAsync(userId);
+      if (cred is null)
+        return false;
+
+      // Verificar contraseña actual
+      if (!PasswordHasher.Verify(currentPassword, cred.PasswordHash))
+        return false;
+
+      // Validar que la nueva contraseña no sea igual a la actual
+      if (PasswordHasher.Verify(newPassword, cred.PasswordHash))
+        return false;
+
+      // Hashear nueva contraseña
+      var newPasswordHash = PasswordHasher.Hash(newPassword);
+
+      // Actualizar credenciales
+      cred.PasswordHash = newPasswordHash;
+      cred.PasswordCreatedAt = DateTime.UtcNow;
+      cred.MustChangePassword = false;
+      cred.PasswordExpiresAt = DateTime.UtcNow.AddDays(90); // Expira en 90 días
+
+      await _users.UpdateLocalCredAsync(cred);
+
+      // Registrar en historial de contraseñas
+      _context.PasswordHistory.Add(new PasswordHistory
+      {
+        UserId = userId,
+        PasswordHash = newPasswordHash,
+        CreatedAt = DateTime.UtcNow
+      });
+
+      await _context.SaveChangesAsync();
+
+      return true;
+    }
   }
 
   public class AzureAuthService : IAzureAuthService
