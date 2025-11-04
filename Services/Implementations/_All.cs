@@ -171,15 +171,14 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
               var user = await _users.FindByIdAsync(userId);
               if (user != null && user.IsActive)
               {
-                return new ValidateTokenResponse
-                {
-                  IsValid = true,
-                  UserId = (int)userId.GetHashCode(), // Convertir Guid a int para compatibilidad
-                  Email = emailClaim,
-                  DisplayName = user.DisplayName,
-                  Roles = rolesClaims,
-                  Message = "Token is valid"
-                };
+                return new ValidateTokenResponse(
+                  IsValid: true,
+                  TokenType: "JWT",
+                  ExpiresAt: ((JwtSecurityToken)validatedToken).ValidTo,
+                  UserId: userId,
+                  SessionId: null,
+                  Message: "Token is valid"
+                );
               }
             }
             
