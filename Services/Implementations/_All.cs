@@ -1,4 +1,8 @@
 ﻿using System.Security.Cryptography;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.IdentityModel.Tokens;
 using AutoMapper;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Identity.Client;
@@ -29,13 +33,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     private readonly IAuthRepository _auth; 
     private readonly ITokenService _tokens;
     private readonly AuthDbContext _context;
+    private readonly IConfiguration _cfg;
 
-    public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context)
+    public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg)
     { 
       _users = users; 
       _auth = auth; 
       _tokens = tokens; 
       _context = context;
+      _cfg = cfg;
     }
 
     public async Task<TokenPair?> LoginLocalAsync(string email,string password)
@@ -124,21 +130,93 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     {
       try
       {
-        // Intentar parsear como GUID (token de sesión)
+        Console.WriteLine($"*********** ValidateTokenAsync - Validating token: {token[..Math.Min(20, token.Length)]}...");
+        
+        // Primero intentar validar como JWT
+        var jwtHandler = new JwtSecurityTokenHandler();
+        if (jwtHandler.CanReadToken(token))
+        {
+          Console.WriteLine($"*********** Token is a valid JWT format");
+          
+          var key = _cfg["Jwt:Key"] ?? "dev";
+          var issuer = _cfg["Jwt:Issuer"] ?? "WsSeguUta.AuthSystem.API";
+          var audience = _cfg["Jwt:Audience"] ?? "WsSeguUta.AuthSystem.API";
+          
+          var validationParameters = new TokenValidationParameters
+          {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = issuer,
+            ValidAudience = audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
+            ClockSkew = TimeSpan.Zero
+          };
+          
+          try
+          {
+            var principal = jwtHandler.ValidateToken(token, validationParameters, out var validatedToken);
+            
+            // Extraer información del token
+            var userIdClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var emailClaim = principal.FindFirst(ClaimTypes.Name)?.Value;
+            var rolesClaims = principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
+            
+            if (Guid.TryParse(userIdClaim, out var userId))
+            {
+              Console.WriteLine($"*********** JWT validated successfully for user {emailClaim}");
+              
+              // Buscar usuario en la base de datos para obtener información completa
+              var user = await _users.FindByIdAsync(userId);
+              if (user != null && user.IsActive)
+              {
+                return new ValidateTokenResponse
+                {
+                  IsValid = true,
+                  UserId = (int)userId.GetHashCode(), // Convertir Guid a int para compatibilidad
+                  Email = emailClaim,
+                  DisplayName = user.DisplayName,
+                  Roles = rolesClaims,
+                  Message = "Token is valid"
+                };
+              }
+            }
+            
+            Console.WriteLine($"*********** JWT validation failed: User not found or inactive");
+            return new ValidateTokenResponse(false, "Unknown", null, null, null, "User not found or inactive");
+          }
+          catch (SecurityTokenExpiredException)
+          {
+            Console.WriteLine($"*********** JWT validation failed: Token expired");
+            return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token expired");
+          }
+          catch (Exception ex)
+          {
+            Console.WriteLine($"*********** JWT validation failed: {ex.Message}");
+            return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token validation failed");
+          }
+        }
+        
+        // Si no es JWT, intentar parsear como GUID (token de sesión - legacy)
+        Console.WriteLine($"*********** Token is not JWT, trying as session GUID");
         if (Guid.TryParse(token, out var tokenGuid))
         {
           var session = await _context.UserSessions
             .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > DateTime.UtcNow);
           if (session != null)
           {
+            Console.WriteLine($"*********** Session token validated successfully");
             return new ValidateTokenResponse(true, "User token", session.ExpiresAt, session.UserId, session.SessionId, "Token is valid");
           }
         }
 
+        Console.WriteLine($"*********** Token validation failed: Invalid format");
         return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token is invalid or expired");
       }
-      catch (Exception)
+      catch (Exception ex)
       {
+        Console.WriteLine($"*********** Token validation error: {ex.Message}");
         return new ValidateTokenResponse(false, "Unknown", null, null, null, "Error validating token");
       }
     }
