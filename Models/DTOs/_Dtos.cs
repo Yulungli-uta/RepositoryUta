@@ -111,7 +111,7 @@ public record LegacyAuthResponse(bool Success, string Message, Guid? UserId, str
 
 // Token Validation
 public record ValidateTokenRequest(string Token, string? ClientId);
-public record ValidateTokenResponse(bool IsValid, string TokenType, DateTime? ExpiresAt, Guid? UserId, Guid? SessionId, string? Message);
+public record ValidateTokenResponse(bool IsValid, string TokenType, DateTime? ExpiresAt, Guid? UserId, Guid? SessionId, string? Message, string Email);
 
 // Application Authentication
 public record AppAuthRequest(string ClientId, string ClientSecret);

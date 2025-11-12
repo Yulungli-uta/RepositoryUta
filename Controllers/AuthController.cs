@@ -1,7 +1,8 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
+using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
@@ -267,7 +268,13 @@ public class AuthController : ControllerBase
         {
             return BadRequest(ApiResponse.Fail("Token is required"));
         }
+        //Console.WriteLine($"********** Auth- ValidateToken token{req.Token[..Math.Min(20, req.Token.Length)]}, clienid: {req.ClientId}");
         var result = await _auth.ValidateTokenAsync(req.Token, req.ClientId);
+        Console.WriteLine("******** ValidateTokenAsync Response ********");
+        Console.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions
+        {
+            WriteIndented = true
+        }));
         return Ok(ApiResponse.Ok(result, result.IsValid ? "Token válido" : "Token inválido"));
     }
 

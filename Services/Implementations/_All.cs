@@ -130,7 +130,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     {
       try
       {
-        Console.WriteLine($"*********** ValidateTokenAsync - Validating token: {token[..Math.Min(20, token.Length)]}...");
+        //Console.WriteLine($"*********** ValidateTokenAsync - Validating token: {token[..Math.Min(20, token.Length)]}...");
         
         // Primero intentar validar como JWT
         var jwtHandler = new JwtSecurityTokenHandler();
@@ -162,38 +162,43 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var userIdClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var emailClaim = principal.FindFirst(ClaimTypes.Name)?.Value;
             var rolesClaims = principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
-            
+            //Console.WriteLine($"********Valores - userIdClaim:{userIdClaim}, emailClaim: {emailClaim}, rolesClaims: {rolesClaims}"); 
+            var rolesText = rolesClaims != null ? string.Join(",", rolesClaims) : "(none)";
+            //Console.WriteLine($"********Valores - userIdClaim:{userIdClaim}, emailClaim: {emailClaim}, rolesClaims: {rolesText}");
             if (Guid.TryParse(userIdClaim, out var userId))
             {
-              Console.WriteLine($"*********** JWT validated successfully for user {emailClaim}");
+              //Console.WriteLine($"*********** JWT validated successfully for user {emailClaim}, userid: {userId}");
               
               // Buscar usuario en la base de datos para obtener información completa
               var user = await _users.FindByIdAsync(userId);
+              Console.WriteLine($"**********userid: {user.Id}, email: {user.Email}");
               if (user != null && user.IsActive)
               {
+                //Console.WriteLine($"************eentro en la validacion estado: {user.IsActive}");
                 return new ValidateTokenResponse(
                   IsValid: true,
                   TokenType: "JWT",
                   ExpiresAt: ((JwtSecurityToken)validatedToken).ValidTo,
                   UserId: userId,
                   SessionId: null,
-                  Message: "Token is valid"
+                  Message: "Token is valid",
+                  Email: user.Email
                 );
               }
             }
             
             Console.WriteLine($"*********** JWT validation failed: User not found or inactive");
-            return new ValidateTokenResponse(false, "Unknown", null, null, null, "User not found or inactive");
+            return new ValidateTokenResponse(false, "Unknown", null, null, null, "User not found or inactive", null);
           }
           catch (SecurityTokenExpiredException)
           {
             Console.WriteLine($"*********** JWT validation failed: Token expired");
-            return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token expired");
+            return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token expired", null);
           }
           catch (Exception ex)
           {
             Console.WriteLine($"*********** JWT validation failed: {ex.Message}");
-            return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token validation failed");
+            return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token validation failed", null);
           }
         }
         
@@ -206,17 +211,17 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
           if (session != null)
           {
             Console.WriteLine($"*********** Session token validated successfully");
-            return new ValidateTokenResponse(true, "User token", session.ExpiresAt, session.UserId, session.SessionId, "Token is valid");
+            return new ValidateTokenResponse(true, "User token", session.ExpiresAt, session.UserId, session.SessionId, "Token is valid", null);
           }
         }
 
         Console.WriteLine($"*********** Token validation failed: Invalid format");
-        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token is invalid or expired");
+        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token is invalid or expired", null);
       }
       catch (Exception ex)
       {
         Console.WriteLine($"*********** Token validation error: {ex.Message}");
-        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Error validating token");
+        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Error validating token", null);
       }
     }
 
@@ -629,7 +634,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             {
               // Para tokens de aplicación, verificar directamente en la base de datos
               // (Simplificado sin validación JWT por ahora)
-              return new ValidateTokenResponse(true, "Application token", DateTime.UtcNow.AddMinutes(60), null, null, "Token is valid");
+              return new ValidateTokenResponse(true, "Application token", DateTime.UtcNow.AddMinutes(60), null, null, "Token is valid", null);
             }
           }
 
@@ -639,16 +644,16 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
           if (userSession != null && userSession.ExpiresAt > DateTime.UtcNow)
           {
-            return new ValidateTokenResponse(true, "User token", userSession.ExpiresAt, userSession.UserId, userSession.SessionId, "Token is valid");
+            return new ValidateTokenResponse(true, "User token", userSession.ExpiresAt, userSession.UserId, userSession.SessionId, "Token is valid", null);
           }
         }
 
-        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token is invalid or expired");
+        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token is invalid or expired", null);
       }
       catch (Exception ex)
       {
         _logger.LogError(ex, "Error validating token");
-        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Error validating token");
+        return new ValidateTokenResponse(false, "Unknown", null, null, null, "Error validating token", null);
       }
     }
 
