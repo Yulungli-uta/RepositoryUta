@@ -40,6 +40,10 @@ public class AuthDbContext : DbContext
     public DbSet<WebSocketConnection> WebSocketConnections => Set<WebSocketConnection>();
     public DbSet<WebSocketMessage> WebSocketMessages => Set<WebSocketMessage>();
     public DbSet<WebSocketStats> WebSocketStats => Set<WebSocketStats>();
+    
+    // ========== VISTAS SQL ==========
+    public DbSet<VwUserRole> VwUserRoles { get; set; }
+    public DbSet<VwRoleMenuItem> VwRoleMenuItems { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +84,10 @@ public class AuthDbContext : DbContext
                 tb.UseSqlOutputClause(false);                    // desactiva OUTPUT para esta tabla
             });
         });
+        
+        // Configuración de vistas SQL
+        modelBuilder.Entity<VwUserRole>().HasNoKey().ToView("vw_UserRoles", "dbo");
+        modelBuilder.Entity<VwRoleMenuItem>().HasNoKey().ToView("vw_RoleMenuItems", "dbo");
 
         base.OnModelCreating(modelBuilder);
 

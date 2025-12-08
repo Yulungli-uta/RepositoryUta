@@ -6,6 +6,7 @@ using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
+using WsSeguUta.AuthSystem.API.Services;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
@@ -14,11 +15,16 @@ public class UsersController : ControllerBase
 {
     private readonly ICrudService<User, CreateUserDto, UpdateUserDto> _svc;
     private readonly AuthDbContext _context;
+    private readonly IUserPermissionService _permissionService;
     
-    public UsersController(ICrudService<User, CreateUserDto, UpdateUserDto> svc, AuthDbContext context)
+    public UsersController(
+        ICrudService<User, CreateUserDto, UpdateUserDto> svc, 
+        AuthDbContext context,
+        IUserPermissionService permissionService)
     {
         _svc = svc;
         _context = context;
+        _permissionService = permissionService;
     }
 
     [HttpGet]
@@ -47,69 +53,8 @@ public class UsersController : ControllerBase
     {
         try
         {
-            // 1. Verificar que el usuario existe
-            var user = await _context.Users
-                .Where(u => u.Id == userId)
-                .Select(u => new { u.Id, u.DisplayName, u.Email })
-                .FirstOrDefaultAsync();
-
-            if (user == null)
-            {
-                return NotFound(ApiResponse.Fail("Usuario no encontrado"));
-            }
-
-            // 2. Obtener roles del usuario (con DISTINCT para evitar duplicados)
-            var roles = await _context.UserRoles
-                .Where(ur => ur.UserId == userId)
-                .Select(ur => new
-                {
-                    roleId = ur.RoleId,
-                    roleName = ur.RoleName
-                })
-                .Distinct()
-                .ToListAsync();
-
-            var roleIds = roles.Select(r => r.roleId).ToList();
-
-            // 3. Obtener menús asignados a esos roles (con DISTINCT)
-            var menuItems = await _context.RoleMenuItems
-                .Where(rmi => roleIds.Contains(rmi.RoleId))
-                .Select(rmi => new
-                {
-                    menuItemId = rmi.MenuItemId,
-                    menuItemName = rmi.MenuItemName,
-                    url = rmi.Url,
-                    icon = rmi.Icon,
-                    parentId = rmi.ParentId,
-                    order = rmi.Order,
-                    roleId = rmi.RoleId,
-                    roleName = rmi.RoleName
-                })
-                .Distinct()
-                .OrderBy(m => m.order)
-                .ToListAsync();
-
-            // 4. Extraer URLs únicas (solo menús con URL, con DISTINCT)
-            var permissions = menuItems
-                .Where(m => !string.IsNullOrEmpty(m.url))
-                .Select(m => m.url)
-                .Distinct()
-                .ToList();
-
-            // 5. Preparar respuesta
-            var response = new
-            {
-                userId = user.Id,
-                displayName = user.DisplayName,
-                email = user.Email,
-                roles = roles,
-                permissions = permissions,
-                menuItems = menuItems
-            };
-
-            Console.WriteLine($"Permissions loaded for user {userId}: {roles.Count} roles, {permissions.Count} permissions, {menuItems.Count} menu items");
-
-            return Ok(ApiResponse.Ok(response, "Permisos obtenidos exitosamente"));
+            var permissions = await _permissionService.GetUserPermissionsAsync(userId.ToString());
+            return Ok(ApiResponse.Ok(permissions, "Permisos obtenidos exitosamente"));
         }
         catch (Exception ex)
         {

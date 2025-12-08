@@ -14,6 +14,7 @@ using WsSeguUta.AuthSystem.API.Infrastructure.Mapping;
 using WsSeguUta.AuthSystem.API.Middleware;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
 using WsSeguUta.AuthSystem.API.Services.Implementations;
+using WsSeguUta.AuthSystem.API.Services;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
 //using HealthChecks.EntityFrameworkCore;
 
@@ -133,6 +134,7 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<IRoleRepository, RoleRepository>();
 builder.Services.AddScoped<IMenuRepository, MenuRepository>();
+builder.Services.AddScoped<IUserPermissionRepository, UserPermissionRepository>();
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
@@ -141,6 +143,7 @@ builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<IAppAuthService, AppAuthService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IWebSocketConnectionService, WebSocketConnectionService>();
+builder.Services.AddScoped<IUserPermissionService, UserPermissionService>();
 
 // SignalR para notificaciones en tiempo real
 builder.Services.AddSignalR(options =>
