@@ -359,6 +359,10 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
       var exp = DateTime.UtcNow.AddDays(7);
       var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, exp, null, null);
       
+      // ========== ACTUALIZAR LAST LOGIN ==========
+      await _users.SetLastLoginAsync(user.Id, DateTime.UtcNow);
+      Console.WriteLine($"Last login updated for Azure AD user {email}");
+      
       // ========== NOTIFICAR LOGIN CON OFFICE365 ==========
       // NOTA: Las notificaciones ahora se manejan en el AuthController
       // para tener acceso a la IP del cliente y otros datos del request
