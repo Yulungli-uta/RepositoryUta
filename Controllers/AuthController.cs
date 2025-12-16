@@ -43,17 +43,18 @@ public class AuthController : ControllerBase
 
     [HttpGet("azure/url")]
     [AllowAnonymous]
-    public async Task<IActionResult> AzureUrl([FromQuery] string? clientId = null)
+    public async Task<IActionResult> AzureUrl([FromQuery] string? clientId = null, string? browserId = null)
     {
         Console.WriteLine($"***************Azure URL requested with clientId: {clientId}");
         //clientId = "legacy-erp-client"; 10000000-0000-0000-0000-000000000001
-        var (url, state) = await _azure.BuildAuthUrlAsync(clientId);
+        var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId);
         //Console.WriteLine($"***************Azure auth URL generated: {url} with state {state}");
         return Ok(ApiResponse.Ok(new
         {
             url,
             state,
             clientId,
+            browserId,
             message = clientId != null ? $"Login will notify {clientId}" : "Login will notify all applications"
         }));
     }
@@ -67,6 +68,7 @@ public class AuthController : ControllerBase
         var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
         var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
         string? clientId = null;
+        string? browserId = null;
         try
         {           
 
@@ -77,6 +79,9 @@ public class AuthController : ControllerBase
             clientId = stateData.TryGetProperty("clientId", out var clientIdProp) && !clientIdProp.ValueKind.Equals(System.Text.Json.JsonValueKind.Null)
               ? clientIdProp.GetString()
               : null;
+            browserId = stateData.TryGetProperty("browserId", out var browserIdProp) && browserIdProp.ValueKind != JsonValueKind.Null
+                ? browserIdProp.GetString()
+                : null;
             //Console.WriteLine($"****************Extracted from state - StateId: {stateId}, ClientId: {clientId}");
         }
         catch (Exception ex)
@@ -185,19 +190,19 @@ public class AuthController : ControllerBase
                             //Console.WriteLine($"***************User ID parsed as GUID: {userId}");
                             //Console.WriteLine($"***************Preparing to send login notification for user {userId}");
                             Console.WriteLine($"***************Client IP: {clientIp}, User Agent: {userAgent}, " +
-                                $"ClientId to notify: {clientId ?? "All applications"}");
+                                $"ClientId to notify: {clientId ?? "All applications"}, browserId: {browserId}");
                             if (!string.IsNullOrEmpty(clientId))
                             {
                                 //Console.WriteLine($"*************Notifying specific application: {clientId}");
                                 await _notificationService.NotifyLoginEventForApplicationAsync(
-                                    userId, "Office365", clientIp, clientId, pair
+                                    userId, "Office365", clientIp, clientId, pair, browserId ?? ""
                                 );
                             }
                             else
                             {
                                 //Console.WriteLine("*************Notifying all subscribed applications");
                                 await _notificationService.NotifyLoginEventAsync(
-                                    userId, "Office365", clientIp, null, null, pair
+                                    userId, "Office365", clientIp, null, null, pair, browserId ?? ""
                                 );
                             }
                             //Console.WriteLine($"***************Office365 login notification sent for user {userId}");

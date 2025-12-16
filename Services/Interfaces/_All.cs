@@ -11,7 +11,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     }
   public interface IAzureAuthService 
     { 
-        Task<(string Url,string State)> BuildAuthUrlAsync(string? clientId = null); 
+        Task<(string Url,string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null); 
         Task<TokenPair?> HandleCallbackAsync(string code,string state); 
     }
   public interface IMenuService { Task<IEnumerable<object>> GetMenuForUserAsync(Guid userId); }
@@ -32,8 +32,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task<bool> UpdateSubscriptionAsync(Guid subscriptionId, string? webhookUrl, string? secretKey, bool? isActive);
     Task<bool> DeleteSubscriptionAsync(Guid subscriptionId);
     Task<IEnumerable<NotificationSubscription>> GetSubscriptionsByApplicationAsync(Guid applicationId);
-    Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions, TokenPair? pair);
-    Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair);
+    Task NotifyLoginEventAsync(Guid userId, string loginType, string? ipAddress, object? roles, object? permissions, TokenPair? pair, string browserId);
+    Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair, string browserId);
     Task NotifyLogoutEventAsync(Guid userId);
     Task NotifyUserCreatedEventAsync(Guid userId);
     Task<NotificationStatsDto> GetNotificationStatsAsync();

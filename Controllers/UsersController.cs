@@ -53,7 +53,7 @@ public class UsersController : ControllerBase
     {
         try
         {
-            var permissions = await _permissionService.GetUserPermissionsAsync(userId.ToString());
+            var permissions = await _permissionService.GetUserPermissionsAsync(userId);
             return Ok(ApiResponse.Ok(permissions, "Permisos obtenidos exitosamente"));
         }
         catch (Exception ex)

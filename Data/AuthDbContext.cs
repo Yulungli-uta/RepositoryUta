@@ -86,8 +86,8 @@ public class AuthDbContext : DbContext
         });
         
         // Configuración de vistas SQL
-        modelBuilder.Entity<VwUserRole>().HasNoKey().ToView("vw_UserRoles", "dbo");
-        modelBuilder.Entity<VwRoleMenuItem>().HasNoKey().ToView("vw_RoleMenuItems", "dbo");
+        modelBuilder.Entity<VwUserRole>().HasNoKey().ToView("vw_UserRoles", "auth");
+        modelBuilder.Entity<VwRoleMenuItem>().HasNoKey().ToView("vw_RoleMenuItems", "auth");
 
         base.OnModelCreating(modelBuilder);
 

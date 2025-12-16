@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.Authorization;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Hubs
@@ -28,19 +27,23 @@ namespace WsSeguUta.AuthSystem.API.Hubs
         {
             try
             {
-                Console.WriteLine($"*******************Client {Context.ConnectionId} joining group for application {clientId} with user {userId ?? "anonymous"}");
+                Console.WriteLine(
+                    $"[NotificationHub] JoinApplicationGroup → conn: {Context.ConnectionId}, clientId: {clientId}, userId: {userId ?? "anonymous"}");
+
                 // Unirse al grupo de la aplicación
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"app_{clientId}");
-                
-                // Registrar la conexión en la base de datos
+
+                // Registrar/actualizar la conexión en la base de datos
                 await _connectionService.RegisterConnectionAsync(Context.ConnectionId, clientId, userId);
-                
-                _logger.LogInformation("Client {ConnectionId} joined application group {ClientId} with user {UserId}", 
+
+                _logger.LogInformation(
+                    "Client {ConnectionId} joined application group {ClientId} with user {UserId}",
                     Context.ConnectionId, clientId, userId ?? "anonymous");
 
                 // Confirmar al cliente que se unió exitosamente
-                await Clients.Caller.SendAsync("JoinedGroup", new { 
-                    clientId, 
+                await Clients.Caller.SendAsync("JoinedGroup", new
+                {
+                    clientId,
                     connectionId = Context.ConnectionId,
                     timestamp = DateTime.UtcNow,
                     message = $"Successfully joined notifications for {clientId}"
@@ -48,12 +51,60 @@ namespace WsSeguUta.AuthSystem.API.Hubs
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error joining application group {ClientId} for connection {ConnectionId}", 
+                _logger.LogError(ex,
+                    "Error joining application group {ClientId} for connection {ConnectionId}",
                     clientId, Context.ConnectionId);
-                
-                await Clients.Caller.SendAsync("Error", new { 
+
+                await Clients.Caller.SendAsync("Error", new
+                {
                     message = "Failed to join application group",
-                    error = ex.Message 
+                    error = ex.Message
+                });
+            }
+        }
+
+        /// <summary>
+        /// 🔑 Unirse al grupo específico de un navegador (browserId)
+        /// Esto permite que el backend envíe notificaciones SOLO a ese navegador.
+        /// </summary>
+        /// <param name="clientId">ID de la aplicación cliente</param>
+        /// <param name="browserId">Identificador único del navegador</param>
+        public async Task JoinBrowserGroup(string clientId, string browserId)
+        {
+            try
+            {
+                Console.WriteLine(
+                    $"[NotificationHub] JoinBrowserGroup → conn: {Context.ConnectionId}, clientId: {clientId}, browserId: {browserId}");
+
+                // Unirse al grupo específico del navegador
+                await Groups.AddToGroupAsync(Context.ConnectionId, $"browser_{browserId}");
+
+                // Registrar/actualizar conexión (userId opcional, aquí null)
+                await _connectionService.RegisterConnectionAsync(Context.ConnectionId, clientId, null);
+
+                _logger.LogInformation(
+                    "Client {ConnectionId} joined browser group {BrowserGroup} for app {ClientId}",
+                    Context.ConnectionId, $"browser_{browserId}", clientId);
+
+                await Clients.Caller.SendAsync("JoinedBrowserGroup", new
+                {
+                    clientId,
+                    browserId,
+                    connectionId = Context.ConnectionId,
+                    timestamp = DateTime.UtcNow,
+                    message = $"Successfully joined browser group for {browserId}"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error joining browser group {BrowserId} for connection {ConnectionId}",
+                    browserId, Context.ConnectionId);
+
+                await Clients.Caller.SendAsync("Error", new
+                {
+                    message = "Failed to join browser group",
+                    error = ex.Message
                 });
             }
         }
@@ -67,12 +118,14 @@ namespace WsSeguUta.AuthSystem.API.Hubs
             try
             {
                 await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"app_{clientId}");
-                
-                _logger.LogInformation("Client {ConnectionId} left application group {ClientId}", 
+
+                _logger.LogInformation(
+                    "Client {ConnectionId} left application group {ClientId}",
                     Context.ConnectionId, clientId);
 
-                await Clients.Caller.SendAsync("LeftGroup", new { 
-                    clientId, 
+                await Clients.Caller.SendAsync("LeftGroup", new
+                {
+                    clientId,
                     connectionId = Context.ConnectionId,
                     timestamp = DateTime.UtcNow,
                     message = $"Successfully left notifications for {clientId}"
@@ -80,7 +133,8 @@ namespace WsSeguUta.AuthSystem.API.Hubs
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error leaving application group {ClientId} for connection {ConnectionId}", 
+                _logger.LogError(ex,
+                    "Error leaving application group {ClientId} for connection {ConnectionId}",
                     clientId, Context.ConnectionId);
             }
         }
@@ -93,7 +147,8 @@ namespace WsSeguUta.AuthSystem.API.Hubs
             try
             {
                 await _connectionService.UpdateLastPingAsync(Context.ConnectionId);
-                await Clients.Caller.SendAsync("Pong", new { 
+                await Clients.Caller.SendAsync("Pong", new
+                {
                     timestamp = DateTime.UtcNow,
                     connectionId = Context.ConnectionId
                 });
@@ -112,8 +167,9 @@ namespace WsSeguUta.AuthSystem.API.Hubs
             try
             {
                 var isActive = await _connectionService.IsConnectionActiveAsync(Context.ConnectionId);
-                
-                await Clients.Caller.SendAsync("ConnectionStatus", new { 
+
+                await Clients.Caller.SendAsync("ConnectionStatus", new
+                {
                     connectionId = Context.ConnectionId,
                     isActive,
                     timestamp = DateTime.UtcNow
@@ -127,21 +183,62 @@ namespace WsSeguUta.AuthSystem.API.Hubs
 
         /// <summary>
         /// Evento cuando un cliente se conecta
+        /// Aquí también aprovechamos para unirlo automáticamente
+        /// a los grupos app_{clientId} y browser_{browserId} si vienen en la query.
         /// </summary>
         public override async Task OnConnectedAsync()
         {
-            var clientInfo = GetClientInfo();
-            
-            _logger.LogInformation("Client connected: {ConnectionId} from {ClientInfo}", 
-                Context.ConnectionId, clientInfo);
+            var httpContext = Context.GetHttpContext();
+            var clientId = httpContext?.Request.Query["clientId"].ToString();
+            var browserId = httpContext?.Request.Query["browserId"].ToString();
+            var userId = httpContext?.Request.Query["userId"].ToString();
 
-            // Enviar mensaje de bienvenida
-            await Clients.Caller.SendAsync("Connected", new { 
-                connectionId = Context.ConnectionId,
-                timestamp = DateTime.UtcNow,
-                message = "WebSocket connection established",
-                clientInfo
-            });
+            var clientInfo = GetClientInfo();
+
+            _logger.LogInformation(
+                "Client connected: {ConnectionId} from {ClientInfo} (clientId={ClientId}, browserId={BrowserId})",
+                Context.ConnectionId, clientInfo, clientId, browserId);
+
+            try
+            {
+                // Grupo por aplicación
+                if (!string.IsNullOrEmpty(clientId))
+                {
+                    await Groups.AddToGroupAsync(Context.ConnectionId, $"app_{clientId}");
+                }
+
+                // Grupo específico por navegador
+                if (!string.IsNullOrEmpty(browserId))
+                {
+                    await Groups.AddToGroupAsync(Context.ConnectionId, $"browser_{browserId}");
+                }
+
+                // Registrar la conexión en BD (si tenemos clientId)
+                if (!string.IsNullOrEmpty(clientId))
+                {
+                    await _connectionService.RegisterConnectionAsync(
+                        Context.ConnectionId,
+                        clientId,
+                        userId
+                    );
+                }
+
+                // Enviar mensaje de bienvenida
+                await Clients.Caller.SendAsync("Connected", new
+                {
+                    connectionId = Context.ConnectionId,
+                    timestamp = DateTime.UtcNow,
+                    message = "WebSocket connection established",
+                    clientInfo,
+                    clientId,
+                    browserId
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error during OnConnectedAsync for {ConnectionId}", Context.ConnectionId);
+            }
 
             await base.OnConnectedAsync();
         }
@@ -155,10 +252,11 @@ namespace WsSeguUta.AuthSystem.API.Hubs
             {
                 // Desregistrar la conexión
                 await _connectionService.UnregisterConnectionAsync(Context.ConnectionId);
-                
+
                 if (exception != null)
                 {
-                    _logger.LogWarning(exception, "Client disconnected with error: {ConnectionId}", Context.ConnectionId);
+                    _logger.LogWarning(exception,
+                        "Client disconnected with error: {ConnectionId}", Context.ConnectionId);
                 }
                 else
                 {
@@ -167,14 +265,15 @@ namespace WsSeguUta.AuthSystem.API.Hubs
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error during disconnection cleanup for {ConnectionId}", Context.ConnectionId);
+                _logger.LogError(ex,
+                    "Error during disconnection cleanup for {ConnectionId}", Context.ConnectionId);
             }
 
             await base.OnDisconnectedAsync(exception);
         }
 
         /// <summary>
-        /// Obtener información del cliente
+        /// Obtener información del cliente (IP y UserAgent)
         /// </summary>
         private string GetClientInfo()
         {
@@ -183,9 +282,8 @@ namespace WsSeguUta.AuthSystem.API.Hubs
 
             var userAgent = httpContext.Request.Headers.UserAgent.ToString();
             var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
-            
+
             return $"IP: {ipAddress}, UserAgent: {userAgent}";
         }
     }
 }
-

@@ -1,14 +1,14 @@
-using WsSeguUta.AuthSystem.API.Data.Repositories;
+﻿using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 
 namespace WsSeguUta.AuthSystem.API.Services;
 
 public interface IUserPermissionService
 {
-    Task<UserPermissionsDto> GetUserPermissionsAsync(string userId);
-    Task<List<UserRoleDto>> GetUserRolesAsync(string userId);
-    Task<List<MenuItemDto>> GetUserMenuItemsAsync(string userId);
-    Task<List<string>> GetUserPermissionsUrlsAsync(string userId);
+    Task<UserPermissionsDto> GetUserPermissionsAsync(Guid userId);
+    Task<List<UserRoleDto>> GetUserRolesAsync(Guid userId);
+    Task<List<MenuItemDto>> GetUserMenuItemsAsync(Guid userId);
+    Task<List<string>> GetUserPermissionsUrlsAsync(Guid userId);
 }
 
 public class UserPermissionService : IUserPermissionService
@@ -20,16 +20,24 @@ public class UserPermissionService : IUserPermissionService
         _repository = repository;
     }
 
-    public async Task<UserPermissionsDto> GetUserPermissionsAsync(string userId)
+    public async Task<UserPermissionsDto> GetUserPermissionsAsync(Guid userId)
     {
-        var rolesTask = _repository.GetUserRolesAsync(userId);
-        var menuItemsTask = _repository.GetUserMenuItemsAsync(userId);
+        // ❌ ANTES:
+        // var rolesTask = _repository.GetUserRolesAsync(userId);
+        // var menuItemsTask = _repository.GetUserMenuItemsAsync(userId);
+        // await Task.WhenAll(rolesTask, menuItemsTask);
+        // var roles = await rolesTask;
+        // var menuItems = await menuItemsTask;
 
-        await Task.WhenAll(rolesTask, menuItemsTask);
+        // ✅ AHORA: todo secuencial para no romper el DbContext
 
-        var roles = await rolesTask;
-        var menuItems = await menuItemsTask;
+        // 1) Roles
+        var roles = await _repository.GetUserRolesAsync(userId);
 
+        // 2) Menús
+        var menuItems = await _repository.GetUserMenuItemsAsync(userId);
+
+        // 3) Permisos (URLs) derivados del menú
         var permissions = menuItems
             .Where(mi => !string.IsNullOrWhiteSpace(mi.Url))
             .Select(mi => mi.Url!)
@@ -45,17 +53,17 @@ public class UserPermissionService : IUserPermissionService
         };
     }
 
-    public async Task<List<UserRoleDto>> GetUserRolesAsync(string userId)
+    public async Task<List<UserRoleDto>> GetUserRolesAsync(Guid userId)
     {
         return await _repository.GetUserRolesAsync(userId);
     }
 
-    public async Task<List<MenuItemDto>> GetUserMenuItemsAsync(string userId)
+    public async Task<List<MenuItemDto>> GetUserMenuItemsAsync(Guid userId)
     {
         return await _repository.GetUserMenuItemsAsync(userId);
     }
 
-    public async Task<List<string>> GetUserPermissionsUrlsAsync(string userId)
+    public async Task<List<string>> GetUserPermissionsUrlsAsync(Guid userId)
     {
         var menuItems = await _repository.GetUserMenuItemsAsync(userId);
 

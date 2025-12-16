@@ -5,9 +5,9 @@ namespace WsSeguUta.AuthSystem.API.Data.Repositories;
 
 public interface IUserPermissionRepository
 {
-    Task<List<UserRoleDto>> GetUserRolesAsync(string userId);
-    Task<List<MenuItemDto>> GetUserMenuItemsAsync(string userId);
-    Task<List<int>> GetUserRoleIdsAsync(string userId);
+    Task<List<UserRoleDto>> GetUserRolesAsync(Guid userId);
+    Task<List<MenuItemDto>> GetUserMenuItemsAsync(Guid userId);
+    Task<List<int>> GetUserRoleIdsAsync(Guid userId);
 }
 
 public class UserPermissionRepository : IUserPermissionRepository
@@ -19,7 +19,7 @@ public class UserPermissionRepository : IUserPermissionRepository
         _context = context;
     }
 
-    public async Task<List<UserRoleDto>> GetUserRolesAsync(string userId)
+    public async Task<List<UserRoleDto>> GetUserRolesAsync(Guid userId)
     {
         var roles = await _context.VwUserRoles
             .Where(ur => ur.UserId == userId)
@@ -41,13 +41,15 @@ public class UserPermissionRepository : IUserPermissionRepository
         return roles;
     }
 
-    public async Task<List<MenuItemDto>> GetUserMenuItemsAsync(string userId)
+    public async Task<List<MenuItemDto>> GetUserMenuItemsAsync(Guid userId)
     {
+        // 1) Primero traemos los RoleId del usuario
         var roleIds = await GetUserRoleIdsAsync(userId);
 
         if (!roleIds.Any())
             return new List<MenuItemDto>();
 
+        // 2) Luego traemos los menús de esos roles
         var menuItems = await _context.VwRoleMenuItems
             .Where(rmi => roleIds.Contains(rmi.RoleId))
             .Select(rmi => new MenuItemDto
@@ -68,7 +70,7 @@ public class UserPermissionRepository : IUserPermissionRepository
         return menuItems;
     }
 
-    public async Task<List<int>> GetUserRoleIdsAsync(string userId)
+    public async Task<List<int>> GetUserRoleIdsAsync(Guid userId)
     {
         var roleIds = await _context.VwUserRoles
             .Where(ur => ur.UserId == userId)
