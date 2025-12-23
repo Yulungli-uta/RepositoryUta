@@ -195,6 +195,34 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IWebSocketConnectionService, WebSocketConnectionService>();
 builder.Services.AddScoped<IUserPermissionService, UserPermissionService>();
 
+// =========================================================
+// Azure Management Service
+// =========================================================
+builder.Services.AddScoped<IAzureAdRepository, AzureAdRepository>();
+builder.Services.AddScoped<IAzureManagementService, AzureManagementService>();
+
+// GraphServiceClient para Microsoft Graph API
+builder.Services.AddSingleton<GraphServiceClient>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var tenantId = config["AzureAd:TenantId"];
+    var clientId = config["AzureAd:ClientId"];
+    var clientSecret = config["AzureAd:ClientSecret"];
+    
+    if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+    {
+        throw new InvalidOperationException("Azure AD configuration is missing. Please configure AzureAd:TenantId, AzureAd:ClientId, and AzureAd:ClientSecret in appsettings.json");
+    }
+    
+    var options = new Azure.Identity.ClientSecretCredentialOptions
+    {
+        AuthorityHost = Azure.Identity.AzureAuthorityHosts.AzurePublicCloud
+    };
+    
+    var credential = new Azure.Identity.ClientSecretCredential(tenantId, clientId, clientSecret, options);
+    return new GraphServiceClient(credential);
+});
+
 // SignalR
 builder.Services.AddSignalR(options =>
 {

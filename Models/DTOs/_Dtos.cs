@@ -142,3 +142,192 @@ public record UserCreatedEventData(Guid UserId, string Email, string DisplayName
 public record NotificationStatsDto(int TotalSubscriptions, int ActiveSubscriptions, int TotalLogs, int SuccessfulLogs, int FailedNotifications);
 public record SubscriptionStatsDto(Guid SubscriptionId, string EventType, string WebhookUrl, bool IsActive, int TotalNotifications, int SuccessfulNotifications, int FailedNotifications, DateTime? LastModified);
 
+
+// ========== DTOs PARA AZURE AD MANAGEMENT ==========
+
+// Crear usuario en Azure AD
+public record CreateAzureUserDto(
+    string Email,
+    string DisplayName,
+    string GivenName,
+    string Surname,
+    string Password,
+    bool ForceChangePasswordNextSignIn = true,
+    string? MailNickname = null,
+    string? JobTitle = null,
+    string? Department = null,
+    string? OfficeLocation = null,
+    string? MobilePhone = null,
+    string? BusinessPhones = null,
+    string? StreetAddress = null,
+    string? City = null,
+    string? State = null,
+    string? Country = null,
+    string? PostalCode = null,
+    string? UsageLocation = null,
+    string? EmployeeId = null,
+    string? CompanyName = null,
+    bool AccountEnabled = true
+);
+
+// Actualizar usuario en Azure AD
+public record UpdateAzureUserDto(
+    string? DisplayName = null,
+    string? GivenName = null,
+    string? Surname = null,
+    string? JobTitle = null,
+    string? Department = null,
+    string? OfficeLocation = null,
+    string? MobilePhone = null,
+    string? BusinessPhones = null,
+    string? StreetAddress = null,
+    string? City = null,
+    string? State = null,
+    string? Country = null,
+    string? PostalCode = null,
+    string? UsageLocation = null,
+    string? EmployeeId = null,
+    string? CompanyName = null,
+    bool? AccountEnabled = null
+);
+
+// Usuario de Azure AD (respuesta)
+public record AzureUserDto(
+    string Id,
+    string Email,
+    string DisplayName,
+    string? GivenName,
+    string? Surname,
+    string? JobTitle,
+    string? Department,
+    string? OfficeLocation,
+    string? MobilePhone,
+    List<string>? BusinessPhones,
+    string? StreetAddress,
+    string? City,
+    string? State,
+    string? Country,
+    string? PostalCode,
+    string? UsageLocation,
+    string? EmployeeId,
+    string? CompanyName,
+    bool AccountEnabled,
+    DateTime? CreatedDateTime,
+    DateTime? LastPasswordChangeDateTime,
+    string? UserType,
+    List<string>? AssignedLicenses
+);
+
+// Cambiar contraseña
+public record ChangePasswordDto(
+    string NewPassword,
+    bool ForceChangeNextSignIn = false
+);
+
+// Resultado de validación de contraseña
+public record PasswordValidationResult(
+    bool IsValid,
+    List<string> Errors,
+    int StrengthScore,
+    string StrengthLevel
+);
+
+// Respuesta de reset de contraseña
+public record PasswordResetResponse(
+    bool Success,
+    string? TemporaryPassword,
+    DateTime ExpiresAt,
+    string Message
+);
+
+// Rol de Azure AD
+public record AzureRoleDto(
+    string Id,
+    string DisplayName,
+    string? Description,
+    bool IsBuiltIn,
+    string? RoleTemplateId,
+    List<string>? RolePermissions
+);
+
+// Asignar rol
+public record AssignRoleDto(
+    string RoleId,
+    string UserId,
+    string? Justification = null
+);
+
+// Crear grupo en Azure AD
+public record CreateAzureGroupDto(
+    string DisplayName,
+    string? Description = null,
+    string? MailNickname = null,
+    string GroupType = "Security",
+    bool MailEnabled = false,
+    bool SecurityEnabled = true,
+    List<string>? Owners = null,
+    List<string>? Members = null
+);
+
+// Actualizar grupo en Azure AD
+public record UpdateAzureGroupDto(
+    string? DisplayName = null,
+    string? Description = null,
+    string? MailNickname = null
+);
+
+// Grupo de Azure AD (respuesta)
+public record AzureGroupDto(
+    string Id,
+    string DisplayName,
+    string? Description,
+    string? Mail,
+    string? MailNickname,
+    bool MailEnabled,
+    bool SecurityEnabled,
+    string GroupType,
+    DateTime? CreatedDateTime,
+    int MemberCount,
+    List<string>? GroupTypes
+);
+
+// Resultado de operación masiva
+public record BulkOperationResult(
+    int TotalRequested,
+    int Successful,
+    int Failed,
+    List<BulkOperationError> Errors,
+    TimeSpan Duration
+);
+
+public record BulkOperationError(
+    string Identifier,
+    string ErrorMessage,
+    string ErrorCode
+);
+
+// Resultado de sincronización
+public record SyncResult(
+    bool Success,
+    int UsersProcessed,
+    int UsersCreated,
+    int UsersUpdated,
+    int UsersFailed,
+    int GroupsProcessed,
+    int GroupsCreated,
+    int GroupsUpdated,
+    List<string> Errors,
+    DateTime SyncDateTime,
+    TimeSpan Duration
+);
+
+// Resultado paginado
+public record PagedResult<T>(
+    List<T> Items,
+    int CurrentPage,
+    int PageSize,
+    int TotalItems,
+    int TotalPages,
+    bool HasNextPage,
+    bool HasPreviousPage
+);

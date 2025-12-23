@@ -113,3 +113,69 @@ public class MenuRepository : IMenuRepository
             r.order });
     }
 }
+
+
+// ========== NUEVO REPOSITORIO PARA AZURE AD MANAGEMENT ==========
+
+public interface IAzureAdRepository
+{
+    Task<User?> FindByAzureIdAsync(Guid azureObjectId);
+    Task<User> CreateOrUpdateFromAzureAsync(string azureObjectId, string email, string displayName);
+    Task LogAzureSyncAsync(string syncType, int processed, int created, int updated, int errors, string details);
+}
+
+public class AzureAdRepository : IAzureAdRepository
+{
+    private readonly AuthDbContext _db;
+    public AzureAdRepository(AuthDbContext db) => _db = db;
+    
+    public Task<User?> FindByAzureIdAsync(Guid azureObjectId) 
+        => _db.Users.FirstOrDefaultAsync(u => u.AzureObjectId == azureObjectId);
+    
+    public async Task<User> CreateOrUpdateFromAzureAsync(string azureObjectId, string email, string displayName)
+    {
+        var user = await FindByAzureIdAsync(Guid.Parse(azureObjectId));
+        
+        if (user == null)
+        {
+            // Crear nuevo usuario local vinculado a Azure
+            user = new User
+            {
+                Id = Guid.NewGuid(),
+                Email = email,
+                DisplayName = displayName,
+                AzureObjectId = Guid.Parse(azureObjectId),
+                UserType = "AzureAD",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            _db.Users.Add(user);
+        }
+        else
+        {
+            // Actualizar usuario existente
+            user.Email = email;
+            user.DisplayName = displayName;
+            user.IsActive = true;
+            _db.Users.Update(user);
+        }
+        
+        await _db.SaveChangesAsync();
+        return user;
+    }
+    
+    public async Task LogAzureSyncAsync(string syncType, int processed, int created, int updated, int errors, string details)
+    {
+        await _db.AzureSyncLogs.AddAsync(new AzureSyncLog
+        {
+            SyncType = syncType,
+            SyncDate = DateTime.UtcNow,
+            RecordsProcessed = processed,
+            NewUsers = created,
+            UpdatedUsers = updated,
+            Errors = errors,
+            Details = details
+        });
+        await _db.SaveChangesAsync();
+    }
+}
