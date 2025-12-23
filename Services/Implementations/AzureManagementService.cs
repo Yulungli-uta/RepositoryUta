@@ -109,7 +109,7 @@ public class AzureManagementService : IAzureManagementService
             );
 
             // Registrar en auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "CreateAzureUser",
                 Module = "AzureManagement",
@@ -234,7 +234,7 @@ public class AzureManagementService : IAzureManagementService
                 );
 
                 // Auditoría
-                await _context.AuditLog.AddAsync(new AuditLog
+                await _context.AuditLogs.AddAsync(new AuditLog
                 {
                     Action = "UpdateAzureUser",
                     Module = "AzureManagement",
@@ -264,7 +264,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = enable ? "EnableAzureUser" : "DisableAzureUser",
                 Module = "AzureManagement",
@@ -291,7 +291,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Users[azureObjectId].DeleteAsync();
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "DeleteAzureUser",
                 Module = "AzureManagement",
@@ -315,12 +315,9 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            var skip = (page - 1) * pageSize;
-
             var users = await _graphClient.Users.GetAsync(config =>
             {
                 config.QueryParameters.Top = pageSize;
-                config.QueryParameters.Skip = skip;
                 if (!string.IsNullOrWhiteSpace(filter))
                 {
                     config.QueryParameters.Filter = filter;
@@ -374,7 +371,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "ResetPasswordAzureUser",
                 Module = "AzureManagement",
@@ -415,7 +412,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "ChangePasswordAzureUser",
                 Module = "AzureManagement",
@@ -595,7 +592,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.DirectoryRoles[roleId].Members.Ref.PostAsync(requestBody);
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "AssignAzureRole",
                 Module = "AzureManagement",
@@ -622,7 +619,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.DirectoryRoles[roleId].Members[azureObjectId].Ref.DeleteAsync();
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "RemoveAzureRole",
                 Module = "AzureManagement",
@@ -712,7 +709,7 @@ public class AzureManagementService : IAzureManagementService
             }
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "CreateAzureGroup",
                 Module = "AzureManagement",
@@ -798,7 +795,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Groups[groupId].PatchAsync(group);
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "UpdateAzureGroup",
                 Module = "AzureManagement",
@@ -824,7 +821,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Groups[groupId].DeleteAsync();
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "DeleteAzureGroup",
                 Module = "AzureManagement",
@@ -847,12 +844,9 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            var skip = (page - 1) * pageSize;
-
             var groups = await _graphClient.Groups.GetAsync(config =>
             {
                 config.QueryParameters.Top = pageSize;
-                config.QueryParameters.Skip = skip;
                 if (!string.IsNullOrWhiteSpace(filter))
                 {
                     config.QueryParameters.Filter = filter;
@@ -918,7 +912,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Groups[groupId].Members.Ref.PostAsync(requestBody);
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "AddUserToAzureGroup",
                 Module = "AzureManagement",
@@ -945,7 +939,7 @@ public class AzureManagementService : IAzureManagementService
             await _graphClient.Groups[groupId].Members[azureObjectId].Ref.DeleteAsync();
 
             // Auditoría
-            await _context.AuditLog.AddAsync(new AuditLog
+            await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "RemoveUserFromAzureGroup",
                 Module = "AzureManagement",
