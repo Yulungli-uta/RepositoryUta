@@ -4,8 +4,10 @@ using Microsoft.Graph.Models;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
-using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
+using GraphUser = Microsoft.Graph.Models.User;
+using GraphGroup = Microsoft.Graph.Models.Group;
+using LocalUser = WsSeguUta.AuthSystem.API.Models.Entities.User;
 using System.Diagnostics;
 using System.Text;
 using System.Security.Cryptography;
@@ -50,7 +52,7 @@ public class AzureManagementService : IAzureManagementService
                 throw new ArgumentException($"Contraseña no cumple con la política: {string.Join(", ", passwordValidation.Errors)}");
 
             // Preparar objeto User de Microsoft Graph
-            var user = new User
+            var user = new GraphUser
             {
                 UserPrincipalName = dto.Email,
                 DisplayName = dto.DisplayName,
@@ -182,7 +184,7 @@ public class AzureManagementService : IAzureManagementService
         {
             _logger.LogInformation($"Actualizando usuario en Azure AD: {azureObjectId}");
 
-            var user = new User
+            var user = new GraphUser
             {
                 DisplayName = dto.DisplayName,
                 GivenName = dto.GivenName,
@@ -258,7 +260,7 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            var user = new User { AccountEnabled = enable };
+            var user = new GraphUser { AccountEnabled = enable };
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
             // Auditoría
@@ -360,7 +362,7 @@ public class AzureManagementService : IAzureManagementService
         {
             var tempPassword = GenerateSecurePasswordAsync().Result;
 
-            var user = new User
+            var user = new GraphUser
             {
                 PasswordProfile = new PasswordProfile
                 {
@@ -401,7 +403,7 @@ public class AzureManagementService : IAzureManagementService
             if (!validation.IsValid)
                 throw new ArgumentException($"Contraseña no cumple con la política: {string.Join(", ", validation.Errors)}");
 
-            var user = new User
+            var user = new GraphUser
             {
                 PasswordProfile = new PasswordProfile
                 {
@@ -647,7 +649,7 @@ public class AzureManagementService : IAzureManagementService
             var members = await _graphClient.DirectoryRoles[roleId].Members.GetAsync();
 
             var users = members?.Value?
-                .OfType<User>()
+                .OfType<GraphUser>()
                 .Select(MapToAzureUserDto) ?? Enumerable.Empty<AzureUserDto>();
 
             return users;
@@ -665,7 +667,7 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            var group = new Group
+            var group = new GraphGroup
             {
                 DisplayName = dto.DisplayName,
                 Description = dto.Description,
@@ -786,7 +788,7 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            var group = new Group
+            var group = new GraphGroup
             {
                 DisplayName = dto.DisplayName,
                 Description = dto.Description,
@@ -970,7 +972,7 @@ public class AzureManagementService : IAzureManagementService
             var members = await _graphClient.Groups[groupId].Members.GetAsync();
 
             var users = members?.Value?
-                .OfType<User>()
+                .OfType<GraphUser>()
                 .Select(MapToAzureUserDto) ?? Enumerable.Empty<AzureUserDto>();
 
             return users;
@@ -989,7 +991,7 @@ public class AzureManagementService : IAzureManagementService
             var memberOf = await _graphClient.Users[azureObjectId].MemberOf.GetAsync();
 
             var groups = memberOf?.Value?
-                .OfType<Group>()
+                .OfType<GraphGroup>()
                 .Select(g => new AzureGroupDto(
                     Id: g.Id!,
                     DisplayName: g.DisplayName!,
@@ -1175,7 +1177,7 @@ public class AzureManagementService : IAzureManagementService
 
     // ========== MÉTODOS AUXILIARES ==========
 
-    private AzureUserDto MapToAzureUserDto(User user)
+    private AzureUserDto MapToAzureUserDto(GraphUser user)
     {
         return new AzureUserDto(
             Id: user.Id!,
