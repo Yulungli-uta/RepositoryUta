@@ -42,7 +42,7 @@ public class UserRepository : IUserRepository
         var q = from ur in _db.UserRoles
                 join r in _db.Roles on ur.RoleId equals r.Id
                 where ur.UserId == userId && !ur.IsDeleted && r.IsActive && !r.IsDeleted
-                      && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow)
+                      && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.Now)
                 select r.Name;
         return await q.ToArrayAsync();
     }
@@ -61,7 +61,7 @@ public class AuthRepository : IAuthRepository
 
     public async Task<(UserSession Sess, User User)?> GetActiveSessionByRefreshHashAsync(string refreshHash)
     {
-        var sess = await _db.UserSessions.FirstOrDefaultAsync(x => x.RefreshToken == refreshHash && x.IsActive && x.ExpiresAt > DateTime.UtcNow);
+        var sess = await _db.UserSessions.FirstOrDefaultAsync(x => x.RefreshToken == refreshHash && x.IsActive && x.ExpiresAt > DateTime.Now);
         if (sess is null) return null;
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == sess.UserId && x.IsActive);
         if (u is null) return null;
@@ -77,16 +77,17 @@ public class AuthRepository : IAuthRepository
 
     public async Task RecordFailedAttemptAsync(string email, string? ip, string? agent, string? reason)
     {
-        _db.FailedLoginAttempts.Add(new FailedLoginAttempt { UserEmail = email, IpAddress = ip, UserAgent = agent, Reason = reason, AttemptedAt = DateTime.UtcNow });
+        _db.FailedLoginAttempts.Add(new FailedLoginAttempt { UserEmail = email, IpAddress = ip, UserAgent = agent, Reason = reason, AttemptedAt = DateTime.Now });
         await _db.SaveChangesAsync();
     }
 
     public async Task InsertLoginAsync(Guid? userId, string emailOrUser, bool ok, string type, string status, string? reason, Guid? sessionId, string? ip, string? agent, string? device)
     {
+        
         _db.LoginHistory.Add(new LoginHistory {
           UserId = userId, LoginType = type, LoginStatus = status,
           FailureReason = reason, SessionId = sessionId, IpAddress = ip, UserAgent = agent, DeviceInfo = device,
-          LoginDateTime = DateTime.UtcNow
+          LoginDateTime = DateTime.Now //.Now
         });
         await _db.SaveChangesAsync();
     }
@@ -147,7 +148,7 @@ public class AzureAdRepository : IAzureAdRepository
                 AzureObjectId = Guid.Parse(azureObjectId),
                 UserType = "AzureAD",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             };
             _db.Users.Add(user);
         }
@@ -169,7 +170,7 @@ public class AzureAdRepository : IAzureAdRepository
         await _db.AzureSyncLogs.AddAsync(new AzureSyncLog
         {
             SyncType = syncType,
-            SyncDate = DateTime.UtcNow,
+            SyncDate = DateTime.Now,
             RecordsProcessed = processed,
             NewUsers = created,
             UpdatedUsers = updated,

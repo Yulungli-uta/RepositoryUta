@@ -29,7 +29,7 @@ public async Task<(string Url,string State)> BuildAuthUrlAsync(string? clientId 
   {
     stateId = stateGuid,
     clientId = clientId,  // ← AQUÍ se guarda qué app inició el login
-    timestamp = DateTime.UtcNow.ToString("O"),
+    timestamp = DateTime.Now.ToString("O"),
     source = "azure_auth"
   };
   
@@ -143,7 +143,7 @@ public async Task NotifyLoginEventForApplicationAsync(Guid userId, string loginT
     var eventData = new
     {
       eventType = "Login",
-      timestamp = DateTime.UtcNow,
+      timestamp = DateTime.Now,
       context = new
       {
         initiatingApplication = clientId,

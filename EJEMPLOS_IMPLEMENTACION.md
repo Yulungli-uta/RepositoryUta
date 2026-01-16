@@ -58,7 +58,7 @@ public async Task<IActionResult> ReceiveAuthNotification([FromBody] WebhookPaylo
                 return BadRequest(new { error = "Unknown event type" });
         }
         
-        return Ok(new { status = "processed", timestamp = DateTime.UtcNow });
+        return Ok(new { status = "processed", timestamp = DateTime.Now });
     }
     catch (Exception ex)
     {
@@ -98,7 +98,7 @@ private async Task ProcessLoginEvent(dynamic loginData)
         UserId = userId,
         Action = "LOGIN_OFFICE365",
         Details = $"Usuario {email} autenticado vía Office365",
-        Timestamp = DateTime.UtcNow,
+        Timestamp = DateTime.Now,
         IpAddress = loginData.ipAddress?.ToString()
     });
     

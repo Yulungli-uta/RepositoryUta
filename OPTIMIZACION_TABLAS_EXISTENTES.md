@@ -56,7 +56,7 @@ public class NotificationSubscription
     public string? SecretKey { get; set; } 
     public string NotificationType { get; set; } = "webhook"; // "webhook", "websocket", "both"
     public bool IsActive { get; set; } = true; 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public DateTime CreatedAt { get; set; } = DateTime.Now; 
     public string? CreatedBy { get; set; }
     public DateTime? ModifiedAt { get; set; }
     public string? ModifiedBy { get; set; }
@@ -78,7 +78,7 @@ public class NotificationLog
     public int? ResponseTime { get; set; } 
     public bool IsSuccess { get; set; } = false; 
     public string? ErrorMessage { get; set; } 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow; 
+    public DateTime CreatedAt { get; set; } = DateTime.Now; 
 }
 ```
 
@@ -147,7 +147,7 @@ private async Task<object> PrepareLoginEventData(Guid userId, string loginType, 
     return new
     {
         eventType = "Login",
-        timestamp = DateTime.UtcNow,
+        timestamp = DateTime.Now,
         context = new
         {
             initiatingApplication = clientId,
@@ -179,7 +179,7 @@ private async Task SendWebhookNotification(NotificationSubscription subscription
 // WebSocket usando la misma estructura de log
 private async Task SendWebSocketNotification(NotificationSubscription subscription, object eventData, string clientId)
 {
-    var startTime = DateTime.UtcNow;
+    var startTime = DateTime.Now;
     
     try
     {
@@ -196,8 +196,8 @@ private async Task SendWebSocketNotification(NotificationSubscription subscripti
             HttpStatusCode = 200, // Exitoso
             ResponseBody = "delivered",
             IsSuccess = true,
-            ResponseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds,
-            CreatedAt = DateTime.UtcNow
+            ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
+            CreatedAt = DateTime.Now
         };
 
         _context.NotificationLogs.Add(log);
@@ -215,9 +215,9 @@ private async Task SendWebSocketNotification(NotificationSubscription subscripti
             WebhookUrl = $"websocket://app_{clientId}",
             HttpStatusCode = 0,
             IsSuccess = false,
-            ResponseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds,
+            ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
             ErrorMessage = ex.Message,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.Now
         };
 
         _context.NotificationLogs.Add(errorLog);

@@ -1,22 +1,23 @@
-﻿using System.Security.Cryptography;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using Microsoft.IdentityModel.Tokens;
-using AutoMapper;
+﻿using AutoMapper;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Identity.Client;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.SignalR;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
+using WsSeguUta.AuthSystem.API.Hubs;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Security;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
 using WsSeguUta.AuthSystem.API.Utilities;
-using WsSeguUta.AuthSystem.API.Hubs;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace WsSeguUta.AuthSystem.API.Services.Implementations
 {
@@ -35,24 +36,26 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly ITokenService _tokens;
         private readonly AuthDbContext _context;
         private readonly IConfiguration _cfg;
+        private readonly ILogger<AuthService> _logger;
 
-        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg)
+        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger)
         {
             _users = users;
             _auth = auth;
             _tokens = tokens;
             _context = context;
             _cfg = cfg;
+            _logger = logger;
         }
 
-        public async Task<TokenPair?> LoginLocalAsync(string email, string password)
+        public async Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
         {
-            var now = DateTime.UtcNow;
+            var now = DateTime.Now;
             var u = await _users.FindByEmailAsync(email);
             if (u is null || !u.IsActive || !string.Equals(u.UserType, "Local", StringComparison.OrdinalIgnoreCase))
             {
                 await _auth.RecordFailedAttemptAsync(email, null, null, "User not found/inactive");
-                await _auth.InsertLoginAsync(null, email, false, "Local", "Failed", "User not found/inactive", null, null, null, null);
+                await _auth.InsertLoginAsync(null, email, false, "Local", "Failed", "User not found/inactive", null, ipAddress, userAgent, deviceInfo);
                 return null;
             }
 
@@ -60,19 +63,19 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             if (cred is null)
             {
                 await _auth.RecordFailedAttemptAsync(email, null, null, "No credentials");
-                await _auth.InsertLoginAsync(u.Id, email, false, "Local", "Failed", "No credentials", null, null, null, null);
+                await _auth.InsertLoginAsync(u.Id, email, false, "Local", "Failed", "No credentials", null, ipAddress, userAgent, deviceInfo);
                 return null;
             }
 
             if (cred.IsLocked || (cred.LockedUntil.HasValue && cred.LockedUntil.Value > now))
             {
-                await _auth.InsertLoginAsync(u.Id, email, false, "Local", "Blocked", "Locked account", null, null, null, null);
+                await _auth.InsertLoginAsync(u.Id, email, false, "Local", "Blocked", "Locked account", null, ipAddress, userAgent, deviceInfo);
                 return null;
             }
 
             if (cred.PasswordExpiresAt.HasValue && cred.PasswordExpiresAt.Value <= now)
             {
-                await _auth.InsertLoginAsync(u.Id, email, false, "Local", "Failed", "Password expired", null, null, null, null);
+                await _auth.InsertLoginAsync(u.Id, email, false, "Local", "Failed", "Password expired", null, ipAddress, userAgent, deviceInfo);
                 return null;
             }
 
@@ -88,7 +91,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 }
                 await _users.UpdateLocalCredAsync(cred);
                 await _auth.RecordFailedAttemptAsync(email, null, null, "Invalid password");
-                await _auth.InsertLoginAsync(u.Id, email, false, "Local", cred.IsLocked ? "Blocked" : "Failed", "Invalid password", null, null, null, null);
+                await _auth.InsertLoginAsync(u.Id, email, false, "Local", cred.IsLocked ? "Blocked" : "Failed", "Invalid password", null, ipAddress, userAgent, deviceInfo);
                 return null;
             }
 
@@ -107,7 +110,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             Console.WriteLine($"Session created for {email}, session ID: {session.SessionId}");
             await _users.SetLastLoginAsync(u.Id, now);
             Console.WriteLine($"Last login updated for {email}");
-            await _auth.InsertLoginAsync(u.Id, email, true, "Local", "Success", null, session.SessionId, null, null, null);
+            await _auth.InsertLoginAsync(u.Id, email, true, "Local", "Success", null, session.SessionId, ipAddress, userAgent, deviceInfo);
             Console.WriteLine($"Login successful for {email}, session {session.SessionId}");
             return new TokenPair(access, refresh);
         }
@@ -122,7 +125,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var newAccess = _tokens.Create(u.Id, u.Email, roles);
             var newRefresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var newHash = _tokens.Hash(newRefresh);
-            var newExp = DateTime.UtcNow.AddDays(7);
+            //var newExp = DateTime.Now.AddDays(7);
+            var newExp = DateTime.Now.AddDays(7);
             await _auth.RevokeSessionAsync(sess.SessionId, "Rotated");
             await _auth.CreateSessionAsync(u.Id, newAccess, newHash, newExp, sess.DeviceInfo, sess.IpAddress);
             return new TokenPair(newAccess, newRefresh);
@@ -152,7 +156,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 var jwtHandler = new JwtSecurityTokenHandler();
                 if (jwtHandler.CanReadToken(token))
                 {
-                    Console.WriteLine($"*********** Token is a valid JWT format");
+                    _logger.LogInformation($"*********** Token is a valid JWT format");
 
                     var key = _cfg["Jwt:Key"] ?? "dev";
                     var issuer = _cfg["Jwt:Issuer"] ?? "WsSeguUta.AuthSystem.API";
@@ -177,13 +181,18 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                         var userIdClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                         var emailClaim = principal.FindFirst(ClaimTypes.Name)?.Value;
                         var rolesClaims = principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
-
                         var rolesText = rolesClaims != null ? string.Join(",", rolesClaims) : "(none)";
+
+                        _logger.LogInformation("*****************************los valores recuperados userIdClaim: {userIdClaim}, emailClaim:{emailClaim} rolesClaims:{rolesClaims} rolesText{rolesText}",
+                            userIdClaim,
+                            emailClaim,
+                            rolesClaims,
+                            rolesText);
 
                         if (Guid.TryParse(userIdClaim, out var userId))
                         {
                             var user = await _users.FindByIdAsync(userId);
-                            Console.WriteLine($"**********userid: {user.Id}, email: {user.Email}");
+                            _logger.LogInformation("**********userid: {user.Id}, email: {user.Email}", user.Id, user.Email);
                             if (user != null && user.IsActive)
                             {
                                 return new ValidateTokenResponse(
@@ -217,7 +226,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 if (Guid.TryParse(token, out var tokenGuid))
                 {
                     var session = await _context.UserSessions
-                      .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > DateTime.UtcNow);
+                      .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > DateTime.Now);
                     if (session != null)
                     {
                         Console.WriteLine($"*********** Session token validated successfully");
@@ -254,9 +263,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var newPasswordHash = PasswordHasher.Hash(newPassword);
 
             cred.PasswordHash = newPasswordHash;
-            cred.PasswordCreatedAt = DateTime.UtcNow;
+            cred.PasswordCreatedAt = DateTime.Now;
             cred.MustChangePassword = false;
-            cred.PasswordExpiresAt = DateTime.UtcNow.AddDays(90);
+            cred.PasswordExpiresAt = DateTime.Now.AddDays(90);
 
             await _users.UpdateLocalCredAsync(cred);
 
@@ -264,7 +273,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             {
                 UserId = userId,
                 PasswordHash = newPasswordHash,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.Now
             });
 
             await _context.SaveChangesAsync();
@@ -303,7 +312,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 stateId = stateGuid,
                 clientId = clientId,
                 browserId = browserId,
-                timestamp = DateTime.UtcNow.ToString("O"),
+                timestamp = DateTime.Now.ToString("O"),
                 source = "azure_auth"
             };
 
@@ -333,7 +342,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             return (url.ToString(), stateEncoded);
         }
 
-        public async Task<TokenPair?> HandleCallbackAsync(string code, string state)
+        public async Task<TokenPair?> HandleCallbackAsync(string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
         {
             var stateJson = Encoding.UTF8.GetString(Convert.FromBase64String(state));
             var stateData = System.Text.Json.JsonDocument.Parse(stateJson).RootElement;
@@ -370,11 +379,26 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var access = _tokens.Create(user.Id, email, roles);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
-            var exp = DateTime.UtcNow.AddDays(7);
+            var exp = DateTime.Now.AddDays(7);
             var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, exp, null, null);
 
-            await _users.SetLastLoginAsync(user.Id, DateTime.UtcNow);
+            await _users.SetLastLoginAsync(user.Id, DateTime.Now);
             Console.WriteLine($"Last login updated for Azure AD user {email}");
+                
+            //await _auth.InsertLoginAsync(
+            //user.Id,
+            //emailOrUser: email,
+            //ok: true,
+            //"AzureAD",
+            //"Success",
+            //reason: null,
+            //session,
+            //ip: ipAddress,
+            //userAgent,
+            //device: deviceInfo
+            //);
+
+            await _auth.InsertLoginAsync(user.Id, email, true, "AzureAD", "Success", null, session.SessionId, ipAddress, userAgent, deviceInfo);
 
             return new TokenPair(access, refresh);
         }
@@ -441,7 +465,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 }
 
                 var tokenId = Guid.NewGuid();
-                var expiresAt = DateTime.UtcNow.AddMinutes(60);
+                var expiresAt = DateTime.Now.AddMinutes(60);
                 var token = _tokenService.Create(tokenId, app.ClientId, new[] { "Application" });
 
                 var authLog = new LegacyAuthLog
@@ -452,7 +476,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     AuthType = "ClientCredentials",
                     IpAddress = "",
                     UserAgent = "",
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 };
 
                 _context.LegacyAuthLogs.Add(authLog);
@@ -470,7 +494,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         public async Task<LegacyAuthResponse> AuthenticateUserLegacyAsync(string clientId, string clientSecret, string userEmail, string password, bool includePermissions, string? ipAddress, string? userAgent)
         {
-            var startTime = DateTime.UtcNow;
+            var startTime = DateTime.Now;
             Guid? applicationId = null;
             Guid? userId = null;
             string authResult = "Failed";
@@ -534,7 +558,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     if (credentials.PasswordHash != providedPasswordHash)
                     {
                         credentials.FailedAttempts++;
-                        credentials.LastFailedAttempt = DateTime.UtcNow;
+                        credentials.LastFailedAttempt = DateTime.Now;
 
                         var maxAttempts = 5;
                         if (credentials.FailedAttempts >= maxAttempts)
@@ -557,7 +581,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     goto LogAndReturn;
                 }
 
-                user.LastLogin = DateTime.UtcNow;
+                user.LastLogin = DateTime.Now;
                 await _context.SaveChangesAsync();
 
                 authResult = "Success";
@@ -577,14 +601,14 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 {
                     var roles = await _context.UserRoles
                       .Where(ur => ur.UserId == user.Id && !ur.IsDeleted &&
-                                  (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+                                  (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.Now))
                       .Join(_context.Roles, ur => ur.RoleId, r => r.Id, (ur, r) => new { r.Id, r.Name, r.Description })
                       .Where(r => r != null)
                       .ToListAsync();
 
                     var permissions = await _context.UserRoles
                       .Where(ur => ur.UserId == user.Id && !ur.IsDeleted &&
-                                  (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+                                  (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.Now))
                       .Join(_context.RolePermissions, ur => ur.RoleId, rp => rp.RoleId, (ur, rp) => rp)
                       .Join(_context.Permissions, rp => rp.PermissionId, p => p.Id, (rp, p) => p)
                       .Where(p => !p.IsDeleted)
@@ -627,14 +651,14 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
                         if (app != null)
                         {
-                            return new ValidateTokenResponse(true, "Application token", DateTime.UtcNow.AddMinutes(60), null, null, "Token is valid", null);
+                            return new ValidateTokenResponse(true, "Application token", DateTime.Now.AddMinutes(60), null, null, "Token is valid", null);
                         }
                     }
 
                     var userSession = await _context.UserSessions
                       .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive);
 
-                    if (userSession != null && userSession.ExpiresAt > DateTime.UtcNow)
+                    if (userSession != null && userSession.ExpiresAt > DateTime.Now)
                     {
                         return new ValidateTokenResponse(true, "User token", userSession.ExpiresAt, userSession.UserId, userSession.SessionId, "Token is valid", null);
                     }
@@ -667,7 +691,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     CreatedAt = app.CreatedAt,
                     TotalAuthAttempts = await _context.LegacyAuthLogs.CountAsync(l => l.ApplicationId == app.Id),
                     SuccessfulAuths = await _context.LegacyAuthLogs.CountAsync(l => l.ApplicationId == app.Id && l.AuthResult == "Success"),
-                    AuthsLast7Days = await _context.LegacyAuthLogs.CountAsync(l => l.ApplicationId == app.Id && l.CreatedAt >= DateTime.UtcNow.AddDays(-7)),
+                    AuthsLast7Days = await _context.LegacyAuthLogs.CountAsync(l => l.ApplicationId == app.Id && l.CreatedAt >= DateTime.Now.AddDays(-7)),
                     ActiveTokens = 0
                 };
 
@@ -693,7 +717,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     FailureReason = failureReason,
                     IpAddress = ipAddress,
                     UserAgent = userAgent,
-                    ResponseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds
+                    ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds
                 };
 
                 _context.LegacyAuthLogs.Add(log);
@@ -877,7 +901,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 return new
                 {
                     eventType = "Login",
-                    timestamp = DateTime.UtcNow,
+                    timestamp = DateTime.Now,
                     context = new
                     {
                         initiatingApplication = clientId,
@@ -913,7 +937,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         private async Task SendWebSocketNotification(NotificationSubscription subscription, object eventData, string clientId, string browserId)
         {
-            var startTime = DateTime.UtcNow;
+            var startTime = DateTime.Now;
 
             try
             {
@@ -963,9 +987,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     : $"websocket://app_{clientId}",
                     HttpStatusCode = 0,
                     IsSuccess = false,
-                    ResponseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds,
+                    ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
                     ErrorMessage = ex.Message,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.Now
                 };
 
                 _context.NotificationLogs.Add(errorLog);
@@ -988,7 +1012,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                   user.DisplayName ?? "",
                   loginType,
                   ipAddress ?? "",
-                  DateTime.UtcNow,
+                  DateTime.Now,
                   roles,
                   permissions,
                   pair: pair
@@ -1010,7 +1034,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 var user = await _context.Users.FindAsync(userId);
                 if (user == null) return;
 
-                var eventData = new LogoutEventData(userId, user.Email, DateTime.UtcNow);
+                var eventData = new LogoutEventData(userId, user.Email, DateTime.Now);
                 await SendDirectNotificationsAsync("Logout", eventData);
                 _logger.LogInformation("Logout notification sent for user {UserId}", userId);
             }
@@ -1094,7 +1118,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         private async Task SendWebhookAsync(NotificationSubscription subscription, object eventData)
         {
-            var startTime = DateTime.UtcNow;
+            var startTime = DateTime.Now;
             var httpClient = _httpClientFactory.CreateClient();
 
             try
@@ -1111,7 +1135,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
                 var response = await httpClient.PostAsync(subscription.WebhookUrl, content);
                 var responseBody = await response.Content.ReadAsStringAsync();
-                var responseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+                var responseTime = (int)(DateTime.Now - startTime).TotalMilliseconds;
 
                 var log = new NotificationLog
                 {
@@ -1132,7 +1156,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             }
             catch (Exception ex)
             {
-                var responseTime = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+                var responseTime = (int)(DateTime.Now - startTime).TotalMilliseconds;
 
                 var errorLog = new NotificationLog
                 {
@@ -1220,8 +1244,8 @@ public class WebSocketConnectionService : IWebSocketConnectionService
             if (existingConnection != null)
             {
                 existingConnection.IsActive = true;
-                existingConnection.ConnectedAt = DateTime.UtcNow;
-                existingConnection.LastPingAt = DateTime.UtcNow;
+                existingConnection.ConnectedAt = DateTime.Now;
+                existingConnection.LastPingAt = DateTime.Now;
                 existingConnection.UserId = userGuid;
             }
             else
@@ -1231,8 +1255,8 @@ public class WebSocketConnectionService : IWebSocketConnectionService
                     ApplicationId = application.Id,
                     ConnectionId = connectionId,
                     UserId = userGuid,
-                    ConnectedAt = DateTime.UtcNow,
-                    LastPingAt = DateTime.UtcNow,
+                    ConnectedAt = DateTime.Now,
+                    LastPingAt = DateTime.Now,
                     IsActive = true
                 };
 
@@ -1261,7 +1285,7 @@ public class WebSocketConnectionService : IWebSocketConnectionService
             if (connection != null)
             {
                 connection.IsActive = false;
-                connection.DisconnectedAt = DateTime.UtcNow;
+                connection.DisconnectedAt = DateTime.Now;
                 await _context.SaveChangesAsync();
 
                 _logger.LogInformation("WebSocket connection unregistered: {ConnectionId}", connectionId);
@@ -1315,7 +1339,7 @@ public class WebSocketConnectionService : IWebSocketConnectionService
 
             if (connection != null)
             {
-                connection.LastPingAt = DateTime.UtcNow;
+                connection.LastPingAt = DateTime.Now;
                 await _context.SaveChangesAsync();
             }
         }
@@ -1347,7 +1371,7 @@ public class WebSocketConnectionService : IWebSocketConnectionService
     {
         try
         {
-            var cutoffTime = DateTime.UtcNow.AddMinutes(-inactiveMinutes);
+            var cutoffTime = DateTime.Now.AddMinutes(-inactiveMinutes);
 
             var inactiveConnections = await _context.WebSocketConnections
               .Where(c => c.IsActive &&
@@ -1357,7 +1381,7 @@ public class WebSocketConnectionService : IWebSocketConnectionService
             foreach (var connection in inactiveConnections)
             {
                 connection.IsActive = false;
-                connection.DisconnectedAt = DateTime.UtcNow;
+                connection.DisconnectedAt = DateTime.Now;
             }
 
             await _context.SaveChangesAsync();

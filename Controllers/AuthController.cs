@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
+using System.Net;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
@@ -15,6 +16,36 @@ public class AuthController : ControllerBase
     private readonly IAuthService _auth;
     private readonly IAzureAuthService _azure;
     private readonly INotificationService _notificationService;
+
+    private string? GetClientIp()
+    {
+        // Si estás detrás de proxy / gateway, esto suele venir poblado     
+        var xff = Request.Headers["X-Forwarded-For"].ToString();
+        if (!string.IsNullOrWhiteSpace(xff))
+            return xff.Split(',')[0].Trim();
+
+        var xRealIp = Request.Headers["X-Real-IP"].ToString();
+        if (!string.IsNullOrWhiteSpace(xRealIp))
+            return xRealIp.Trim();
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        // Normaliza loopback IPv6 a 127.0.0.1 (útil en dev)
+        if (ip == "::1") return "127.0.0.1";
+
+        return ip;
+    }
+
+    private string? GetUserAgent()
+        => Request.Headers["User-Agent"].ToString();
+
+    private string? GetDeviceInfo()
+    {
+        // opcional: tu front/cliente puede enviar algo como:
+        // "Chrome 120 | Windows 11 | Laptop"
+        var device = Request.Headers["X-Device-Info"].ToString();
+        return string.IsNullOrWhiteSpace(device) ? null : device;
+    }
 
     public AuthController(IAuthService auth, IAzureAuthService azure, INotificationService notificationService)
     {
@@ -28,8 +59,12 @@ public class AuthController : ControllerBase
     [EnableRateLimiting("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
+        var ip = GetClientIp();
+        var ua = GetUserAgent();
+        var device = GetDeviceInfo();
+
         Console.WriteLine($"Login attempt for {req.Email}");
-        var pair = await _auth.LoginLocalAsync(req.Email, req.Password);
+        var pair = await _auth.LoginLocalAsync(req.Email, req.Password, ipAddress: ip, userAgent: ua, deviceInfo: device);
         return pair is null ? Unauthorized(ApiResponse.Fail("Credenciales inválidas")) : Ok(ApiResponse.Ok(pair, "Login exitoso"));
     }
 

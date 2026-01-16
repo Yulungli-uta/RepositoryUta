@@ -182,8 +182,8 @@ public class WebSocketConnectionService : IWebSocketConnectionService
             ApplicationId = application.Id,
             ConnectionId = connectionId,
             UserId = userGuid,
-            ConnectedAt = DateTime.UtcNow,
-            LastPingAt = DateTime.UtcNow,
+            ConnectedAt = DateTime.Now,
+            LastPingAt = DateTime.Now,
             IsActive = true
         };
 
@@ -230,7 +230,7 @@ public class WebSocketConnectionService : IWebSocketConnectionService
 
         if (connection != null)
         {
-            connection.LastPingAt = DateTime.UtcNow;
+            connection.LastPingAt = DateTime.Now;
             await _context.SaveChangesAsync();
         }
     }
@@ -289,7 +289,7 @@ public class NotificationService : INotificationService
             var eventData = new
             {
                 eventType = "Login",
-                timestamp = DateTime.UtcNow,
+                timestamp = DateTime.Now,
                 context = new
                 {
                     initiatingApplication = clientId,
@@ -356,9 +356,9 @@ public class NotificationService : INotificationService
                     ConnectionId = connectionId,
                     EventType = "Login",
                     MessageData = System.Text.Json.JsonSerializer.Serialize(eventData),
-                    SentAt = DateTime.UtcNow,
+                    SentAt = DateTime.Now,
                     IsDelivered = true, // Asumimos entrega exitosa con SignalR
-                    DeliveredAt = DateTime.UtcNow
+                    DeliveredAt = DateTime.Now
                 };
 
                 _context.WebSocketMessages.Add(message);

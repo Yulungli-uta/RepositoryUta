@@ -19,10 +19,10 @@ return new AppAuthResponse(true, "Authentication successful", tokenId, expiresAt
 **Problema:** Uso de propiedad `AuthTime` que no existe
 ```csharp
 // ANTES (ERROR)
-AuthTime = DateTime.UtcNow
+AuthTime = DateTime.Now
 
 // DESPUÉS (CORREGIDO)
-CreatedAt = DateTime.UtcNow
+CreatedAt = DateTime.Now
 ```
 
 ### 3. Constructor Incorrecto de AppAuthResponse

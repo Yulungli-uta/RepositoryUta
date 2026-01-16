@@ -45,7 +45,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 {
                     clientId,
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.UtcNow,
+                    timestamp = DateTime.Now,
                     message = $"Successfully joined notifications for {clientId}"
                 });
             }
@@ -91,7 +91,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                     clientId,
                     browserId,
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.UtcNow,
+                    timestamp = DateTime.Now,
                     message = $"Successfully joined browser group for {browserId}"
                 });
             }
@@ -127,7 +127,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 {
                     clientId,
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.UtcNow,
+                    timestamp = DateTime.Now,
                     message = $"Successfully left notifications for {clientId}"
                 });
             }
@@ -149,7 +149,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 await _connectionService.UpdateLastPingAsync(Context.ConnectionId);
                 await Clients.Caller.SendAsync("Pong", new
                 {
-                    timestamp = DateTime.UtcNow,
+                    timestamp = DateTime.Now,
                     connectionId = Context.ConnectionId
                 });
             }
@@ -172,7 +172,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 {
                     connectionId = Context.ConnectionId,
                     isActive,
-                    timestamp = DateTime.UtcNow
+                    timestamp = DateTime.Now
                 });
             }
             catch (Exception ex)
@@ -227,7 +227,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 await Clients.Caller.SendAsync("Connected", new
                 {
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.UtcNow,
+                    timestamp = DateTime.Now,
                     message = "WebSocket connection established",
                     clientInfo,
                     clientId,

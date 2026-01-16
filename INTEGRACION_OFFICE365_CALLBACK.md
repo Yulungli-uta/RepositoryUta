@@ -236,7 +236,7 @@ private async Task ProcessOffice365Login(dynamic loginData)
         UserId = userId,
         Action = "OFFICE365_LOGIN",
         Details = $"Login desde Office365 - IP: {ipAddress}",
-        Timestamp = DateTime.UtcNow
+        Timestamp = DateTime.Now
     });
     
     // Sincronizar permisos si es necesario

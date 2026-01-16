@@ -1,8 +1,8 @@
 ﻿namespace WsSeguUta.AuthSystem.API.Models.DTOs;
 
 public record ApiResponse(bool Success, object? Data, string? Message, IEnumerable<string>? Errors, DateTime Timestamp)
-{ public static ApiResponse Ok(object? data=null, string? message=null) => new(true, data, message, null, DateTime.UtcNow);
-  public static ApiResponse Fail(string message, IEnumerable<string>? errors=null) => new(false, null, message, errors, DateTime.UtcNow); }
+{ public static ApiResponse Ok(object? data=null, string? message=null) => new(true, data, message, null, DateTime.Now);
+  public static ApiResponse Fail(string message, IEnumerable<string>? errors=null) => new(false, null, message, errors, DateTime.Now); }
 
 public record LoginRequest(string Email, string Password);
 public record RefreshRequest(string RefreshToken);

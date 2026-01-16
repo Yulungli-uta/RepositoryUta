@@ -4,7 +4,14 @@ using WsSeguUta.AuthSystem.API.Models.Entities;
 
 namespace WsSeguUta.AuthSystem.API.Services.Interfaces
 {
-  public interface IAuthService { Task<TokenPair?> LoginLocalAsync(string email,string password); Task<TokenPair?> RefreshAsync(string refreshToken); Task<bool> LogoutAsync(string refreshToken); Task<object?> MeAsync(Guid userId); Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId); Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword); }
+  public interface IAuthService { 
+        Task<TokenPair?> LoginLocalAsync(string email,string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null); 
+        Task<TokenPair?> RefreshAsync(string refreshToken); 
+        Task<bool> LogoutAsync(string refreshToken); 
+        Task<object?> MeAsync(Guid userId); 
+        Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId); 
+        Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword); 
+    }
   public interface ITokenService 
     { 
         string Create(Guid userId,string email,IEnumerable<string> roles); string Hash(string input); 
@@ -12,7 +19,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
   public interface IAzureAuthService 
     { 
         Task<(string Url,string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null); 
-        Task<TokenPair?> HandleCallbackAsync(string code,string state); 
+        Task<TokenPair?> HandleCallbackAsync(string code,string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null); 
     }
   public interface IMenuService { Task<IEnumerable<object>> GetMenuForUserAsync(Guid userId); }
   

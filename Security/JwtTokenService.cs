@@ -10,7 +10,7 @@ namespace WsSeguUta.AuthSystem.API.Security
             var aud=_cfg["Jwt:Audience"]??"WsSeguUta.AuthSystem.API";
       var claims=new List<Claim>{ new(ClaimTypes.NameIdentifier,userId.ToString()), new(ClaimTypes.Name,email) }; claims.AddRange(roles.Select(r=>new Claim(ClaimTypes.Role,r)));
       var creds=new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),SecurityAlgorithms.HmacSha256);
-      var token=new JwtSecurityToken(issuer,aud,claims,expires:DateTime.UtcNow.Add(lifetime??TimeSpan.FromHours(8)),signingCredentials:creds);
+      var token=new JwtSecurityToken(issuer,aud,claims,expires:DateTime.Now.Add(lifetime??TimeSpan.FromHours(8)),signingCredentials:creds);
       return new JwtSecurityTokenHandler().WriteToken(token);
     }
   }

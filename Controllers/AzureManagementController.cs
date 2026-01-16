@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Graph.Models;
+using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
@@ -7,7 +9,7 @@ namespace WsSeguUta.AuthSystem.API.Controllers;
 
 [ApiController]
 [Route("api/azure-management")]
-[Authorize(Roles = "Admin")] // Solo administradores pueden gestionar Azure AD
+[Authorize(Roles = "Administrador")] // Solo administradores pueden gestionar Azure AD
 public class AzureManagementController : ControllerBase
 {
     private readonly IAzureManagementService _azureMgmt;
@@ -130,12 +132,15 @@ public class AzureManagementController : ControllerBase
         [FromQuery] int pageSize = 50,
         [FromQuery] string? filter = null)
     {
+        _logger.LogInformation($"*************************Listing users: page={page}, pageSize={pageSize}, filter={filter}");
         var result = await _azureMgmt.ListUsersFromAzureAsync(page, pageSize, filter);
+        string jsonResult = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+        _logger.LogInformation("Resultado de Azure:\n{Data}", jsonResult);
         return Ok(ApiResponse.Ok(result));
     }
 
     // ========== GESTIÓN DE CONTRASEÑAS ==========
-
+    
     /// <summary>
     /// Resetear contraseña de un usuario en Azure AD
     /// </summary>
@@ -217,7 +222,53 @@ public class AzureManagementController : ControllerBase
     [HttpGet("users/{id}/azure-roles")]
     public async Task<IActionResult> GetUserAzureRoles(string id)
     {
+        _logger.LogInformation($"*************************Listing AzureAD roles -GetUserAzureRoles : userid={id}");
         var roles = await _azureMgmt.GetUserAzureRolesAsync(id);
+
+        // Serializar a JSON con formato legible
+        var rolesJson = System.Text.Json.JsonSerializer.Serialize(
+            roles,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+        _logger.LogInformation($"AzureAD Roles response JSON: {rolesJson}");
+        
+        _logger.LogInformation($"*************************Listing AzureAD user -GetUserFromAzureAsync : userid={id}");
+        var user = await _azureMgmt.GetUserFromAzureAsync(id);
+
+        
+        var userJson = System.Text.Json.JsonSerializer.Serialize(
+           user,
+           new System.Text.Json.JsonSerializerOptions
+           {
+               WriteIndented = true
+           });
+        _logger.LogInformation($"AzureAD user response JSON: {userJson}");
+        _logger.LogInformation($"*************************Listing AzureAD user -GetUserAzureGroupsAsync : userid={id}");
+        var userGroups = await _azureMgmt.GetUserAzureGroupsAsync(id);
+        var userGroupsJson = System.Text.Json.JsonSerializer.Serialize(
+           userGroups,
+           new System.Text.Json.JsonSerializerOptions
+           {
+               WriteIndented = true
+           });
+        _logger.LogInformation($"AzureAD group response JSON: {userGroupsJson}");
+
+        //_logger.LogInformation($"*************************Listing AzureAD user -allJson : userid={id}");
+        //var alluserJson = await _azureMgmt.GetAllAzureDirectoryRolesAsync();
+
+        //var allJson = System.Text.Json.JsonSerializer.Serialize(
+        //   alluserJson,
+        //   new System.Text.Json.JsonSerializerOptions
+        //   {
+        //       WriteIndented = true
+        //   });
+
+        //_logger.LogInformation($"AzureAD all response JSON: {allJson}");
+
+
         return Ok(ApiResponse.Ok(roles));
     }
 
@@ -409,6 +460,7 @@ public class AzureManagementController : ControllerBase
     // ========== SINCRONIZACIÓN ==========
 
     /// <summary>
+    /// Sincronizar un usuario de Azure AD con la base de datos local
     /// Sincronizar un usuario de Azure AD con la base de datos local
     /// </summary>
     [HttpPost("sync/user/{id}")]
