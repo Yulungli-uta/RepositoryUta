@@ -51,6 +51,8 @@ Log.Logger = new LoggerConfiguration()
     .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day)
     .CreateLogger();
 
+builder.Logging.ClearProviders();
+builder.Logging.AddSerilog(Log.Logger);
 builder.Host.UseSerilog();
 
 // =========================================================
