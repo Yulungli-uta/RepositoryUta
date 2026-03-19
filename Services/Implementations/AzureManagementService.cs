@@ -1,11 +1,7 @@
-using Azure.Identity;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Kiota.Abstractions;
-using Microsoft.Kiota.Abstractions;
-using Microsoft.Kiota.Abstractions.Serialization;
-using Microsoft.Kiota.Serialization.Json;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -17,12 +13,14 @@ using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
 using GraphGroup = Microsoft.Graph.Models.Group;
 using GraphUser = Microsoft.Graph.Models.User;
-using LocalUser = WsSeguUta.AuthSystem.API.Models.Entities.User;
 
 namespace WsSeguUta.AuthSystem.API.Services.Implementations;
 
 public class AzureManagementService : IAzureManagementService
 {
+    private const int DefaultPageSize = 50;
+    private const int MaxPageSize = 200;
+
     private readonly GraphServiceClient _graphClient;
     private readonly IAzureAdRepository _azureAdRepo;
     private readonly AuthDbContext _context;
@@ -46,18 +44,15 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            _logger.LogInformation($"Creando usuario en Azure AD: {dto.Email}");
+            _logger.LogInformation("Creando usuario en Azure AD: {Email}", dto.Email);
 
-            // Validar email
             if (!IsValidEmail(dto.Email))
                 throw new ArgumentException("Email inválido");
 
-            // Validar contraseña
             var passwordValidation = await ValidatePasswordPolicyAsync(dto.Password);
             if (!passwordValidation.IsValid)
                 throw new ArgumentException($"Contraseña no cumple con la política: {string.Join(", ", passwordValidation.Errors)}");
 
-            // Preparar objeto User de Microsoft Graph
             var user = new GraphUser
             {
                 UserPrincipalName = dto.Email,
@@ -85,26 +80,19 @@ public class AzureManagementService : IAzureManagementService
                 }
             };
 
-            // Agregar teléfonos de negocio si se proporcionan
             if (!string.IsNullOrWhiteSpace(dto.BusinessPhones))
-            {
                 user.BusinessPhones = dto.BusinessPhones.Split(',').Select(p => p.Trim()).ToList();
-            }
 
-            // Llamar a Microsoft Graph API
             var createdUser = await _graphClient.Users.PostAsync(user);
-
             if (createdUser == null)
                 throw new Exception("Error al crear usuario en Azure AD");
 
-            // Sincronizar con BD Local
             await _azureAdRepo.CreateOrUpdateFromAzureAsync(
                 createdUser.Id!,
                 createdUser.UserPrincipalName!,
                 createdUser.DisplayName!
             );
 
-            // Registrar en log de sincronización
             await _azureAdRepo.LogAzureSyncAsync(
                 syncType: "UserCreated",
                 processed: 1,
@@ -114,7 +102,6 @@ public class AzureManagementService : IAzureManagementService
                 details: $"Usuario creado: {dto.Email}"
             );
 
-            // Registrar en auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "CreateAzureUser",
@@ -125,13 +112,12 @@ public class AzureManagementService : IAzureManagementService
             });
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Usuario creado exitosamente en Azure AD: {dto.Email}");
-
+            _logger.LogInformation("Usuario creado exitosamente en Azure AD: {Email}", dto.Email);
             return MapToAzureUserDto(createdUser);
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error de Microsoft Graph al crear usuario: {ex.Message}");
+            _logger.LogError(ex, "Error de Microsoft Graph al crear usuario. Email={Email}", dto.Email);
             throw new Exception($"Error al crear usuario en Azure AD: {ex.Message}", ex);
         }
     }
@@ -140,15 +126,17 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            Console.WriteLine($"*************Accedio a GetUserFromAzureAsync");
+            _logger.LogDebug("GetUserFromAzureAsync: {AzureObjectId}", azureObjectId);
+
             var user = await _graphClient.Users[azureObjectId].GetAsync(config =>
             {
-                config.QueryParameters.Select = new[] { 
-                    "id", "userPrincipalName", "displayName", "givenName", "surname",
-                    "jobTitle", "department", "officeLocation", "mobilePhone", "businessPhones",
-                    "streetAddress", "city", "state", "country", "postalCode", "usageLocation",
-                    "employeeId", "companyName", "accountEnabled", "createdDateTime",
-                    "lastPasswordChangeDateTime", "userType", "assignedLicenses"
+                config.QueryParameters.Select = new[]
+                {
+                    "id","userPrincipalName","displayName","givenName","surname",
+                    "jobTitle","department","officeLocation","mobilePhone","businessPhones",
+                    "streetAddress","city","state","country","postalCode","usageLocation",
+                    "employeeId","companyName","accountEnabled","createdDateTime",
+                    "lastPasswordChangeDateTime","userType","assignedLicenses"
                 };
             });
 
@@ -156,50 +144,26 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al obtener usuario de Azure AD: {ex.Message}");
+            _logger.LogError(ex, "Error al obtener usuario de Azure AD. AzureObjectId={AzureObjectId}", azureObjectId);
             return null;
         }
     }
 
     public async Task<AzureUserDto?> GetUserByEmailFromAzureAsync(string email)
     {
-        //try
-        //{
-        //    var users = await _graphClient.Users.GetAsync(config =>
-        //    {
-        //        config.QueryParameters.Filter = $"userPrincipalName eq '{email}'";
-        //        config.QueryParameters.Select = new[] { 
-        //            "id", "userPrincipalName", "displayName", "givenName", "surname",
-        //            "jobTitle", "department", "officeLocation", "mobilePhone", "businessPhones",
-        //            "accountEnabled", "createdDateTime", "userType"
-        //        };
-        //    });
-
-        //    var user = users?.Value?.FirstOrDefault();
-        //    return user != null ? MapToAzureUserDto(user) : null;
-        //}
-        //catch (ServiceException ex)
-        //{
-        //    _logger.LogError($"Error al buscar usuario por email en Azure AD: {ex.Message}");
-        //    return null;
-        //}
-
         try
         {
-            // Escapar comillas simples para OData
-
             var safe = email.Replace("'", "''").Trim();
 
             var users = await _graphClient.Users.GetAsync(config =>
             {
-                // Buscar por UPN o por mail
                 config.QueryParameters.Filter = $"(userPrincipalName eq '{safe}' or mail eq '{safe}')";
                 config.QueryParameters.Select = new[]
                 {
-                "id", "userPrincipalName", "mail", "displayName", "givenName", "surname",
-                "jobTitle", "department", "officeLocation", "mobilePhone", "businessPhones",
-                "accountEnabled", "createdDateTime", "userType"
-            };
+                    "id","userPrincipalName","mail","displayName","givenName","surname",
+                    "jobTitle","department","officeLocation","mobilePhone","businessPhones",
+                    "accountEnabled","createdDateTime","userType"
+                };
             });
 
             var user = users?.Value?.FirstOrDefault();
@@ -207,7 +171,7 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al buscar usuario por correo: {ex.Message}");
+            _logger.LogError(ex, "Error al buscar usuario por correo. Email={Email}", email);
             return null;
         }
     }
@@ -216,7 +180,7 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            _logger.LogInformation($"Actualizando usuario en Azure AD: {azureObjectId}");
+            _logger.LogInformation("Actualizando usuario en Azure AD: {AzureObjectId}", azureObjectId);
 
             var user = new GraphUser
             {
@@ -239,25 +203,20 @@ public class AzureManagementService : IAzureManagementService
             };
 
             if (!string.IsNullOrWhiteSpace(dto.BusinessPhones))
-            {
                 user.BusinessPhones = dto.BusinessPhones.Split(',').Select(p => p.Trim()).ToList();
-            }
 
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
-            // Obtener usuario actualizado
             var updatedUser = await GetUserFromAzureAsync(azureObjectId);
 
             if (updatedUser != null)
             {
-                // Actualizar en BD local
                 await _azureAdRepo.CreateOrUpdateFromAzureAsync(
                     azureObjectId,
                     updatedUser.Email,
                     updatedUser.DisplayName
                 );
 
-                // Log de sincronización
                 await _azureAdRepo.LogAzureSyncAsync(
                     syncType: "UserUpdated",
                     processed: 1,
@@ -267,7 +226,6 @@ public class AzureManagementService : IAzureManagementService
                     details: $"Usuario actualizado: {updatedUser.Email}"
                 );
 
-                // Auditoría
                 await _context.AuditLogs.AddAsync(new AuditLog
                 {
                     Action = "UpdateAzureUser",
@@ -276,16 +234,16 @@ public class AzureManagementService : IAzureManagementService
                     NewValues = System.Text.Json.JsonSerializer.Serialize(dto),
                     Timestamp = DateTime.Now
                 });
+
                 await _context.SaveChangesAsync();
             }
 
-            _logger.LogInformation($"Usuario actualizado exitosamente en Azure AD: {azureObjectId}");
-
+            _logger.LogInformation("Usuario actualizado exitosamente en Azure AD: {AzureObjectId}", azureObjectId);
             return updatedUser;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al actualizar usuario en Azure AD: {ex.Message}");
+            _logger.LogError(ex, "Error al actualizar usuario en Azure AD. AzureObjectId={AzureObjectId}", azureObjectId);
             throw new Exception($"Error al actualizar usuario: {ex.Message}", ex);
         }
     }
@@ -297,7 +255,6 @@ public class AzureManagementService : IAzureManagementService
             var user = new GraphUser { AccountEnabled = enable };
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = enable ? "EnableAzureUser" : "DisableAzureUser",
@@ -306,14 +263,13 @@ public class AzureManagementService : IAzureManagementService
                 NewValues = $"AccountEnabled: {enable}",
                 Timestamp = DateTime.Now
             });
-            await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Usuario {(enable ? "habilitado" : "deshabilitado")} en Azure AD: {azureObjectId}");
+            await _context.SaveChangesAsync();
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al {(enable ? "habilitar" : "deshabilitar")} usuario: {ex.Message}");
+            _logger.LogError(ex, "Error al habilitar/deshabilitar usuario. AzureObjectId={AzureObjectId}", azureObjectId);
             return false;
         }
     }
@@ -324,7 +280,6 @@ public class AzureManagementService : IAzureManagementService
         {
             await _graphClient.Users[azureObjectId].DeleteAsync();
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "DeleteAzureUser",
@@ -333,54 +288,25 @@ public class AzureManagementService : IAzureManagementService
                 NewValues = $"PermanentDelete: {permanentDelete}",
                 Timestamp = DateTime.Now
             });
-            await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Usuario eliminado de Azure AD: {azureObjectId}");
+            await _context.SaveChangesAsync();
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al eliminar usuario de Azure AD: {ex.Message}");
+            _logger.LogError(ex, "Error al eliminar usuario de Azure AD. AzureObjectId={AzureObjectId}", azureObjectId);
             return false;
         }
     }
 
-    public async Task<PagedResult<AzureUserDto>> ListUsersFromAzureAsync(int page = 1, int pageSize = 50, string? filter = null)
+    public async Task<PagedResult<AzureUserDto>> ListUsersFromAzureAsync(int page = 1, int pageSize = DefaultPageSize, string? filter = null)
     {
         try
         {
-            //var users = await _graphClient.Users.GetAsync(config =>
-            //{
-            //    config.QueryParameters.Top = pageSize;
-            //    if (!string.IsNullOrWhiteSpace(filter))
-            //    {
-            //        config.QueryParameters.Filter = filter;
-            //    }
-            //    config.QueryParameters.Select = new[] { 
-            //        "id", "userPrincipalName", "displayName", "givenName", "surname",
-            //        "jobTitle", "department", "accountEnabled", "createdDateTime", "userType"
-            //    };
-            //    config.QueryParameters.Orderby = new[] { "displayName" };
-            //});
+            NormalizePaging(ref page, ref pageSize);
 
-            //var userDtos = users?.Value?.Select(MapToAzureUserDto).ToList() ?? new List<AzureUserDto>();
-            //var totalCount = users?.OdataCount ?? userDtos.Count;
+            _logger.LogInformation("Graph ListUsers: page={Page}, pageSize={PageSize}, filter={Filter}", page, pageSize, filter);
 
-            //return new PagedResult<AzureUserDto>(
-            //    Items: userDtos,
-            //    CurrentPage: page,
-            //    PageSize: pageSize,
-            //    TotalItems: (int)totalCount,
-            //    TotalPages: (int)Math.Ceiling((double)totalCount / pageSize),
-            //    HasNextPage: page * pageSize < totalCount,
-            //    HasPreviousPage: page > 1
-            //);
-            if (page < 1) page = 1;
-            if (pageSize < 1) pageSize = 50;
-
-            _logger.LogInformation("Graph ListUsers: page={page}, pageSize={pageSize}, filter={filter}", page, pageSize, filter);
-
-            // 1) Traer primera página SIEMPRE con count
             var first = await _graphClient.Users.GetAsync(config =>
             {
                 config.QueryParameters.Top = pageSize;
@@ -391,26 +317,18 @@ public class AzureManagementService : IAzureManagementService
 
                 config.QueryParameters.Select = new[]
                 {
-                "id","userPrincipalName","displayName","givenName","surname",
-                "jobTitle","department","accountEnabled","createdDateTime","userType"
-            };
+                    "id","userPrincipalName","displayName","givenName","surname",
+                    "jobTitle","department","accountEnabled","createdDateTime","userType"
+                };
 
                 config.QueryParameters.Orderby = new[] { "displayName" };
-
-                // requerido para $count (y filtros avanzados)
                 config.Headers.Add("ConsistencyLevel", "eventual");
             });
 
-            // 2) Guardar count REAL desde la primera respuesta
             long? totalCount = first?.OdataCount;
-
-            // Si por alguna razón viene null, hacemos una llamada SOLO para obtener count
             if (!totalCount.HasValue)
-            {
                 totalCount = await GetUsersCountAsync(filter);
-            }
 
-            // 3) Movernos hasta la página solicitada usando nextLink
             var current = first;
             var hops = 1;
             while (hops < page && !string.IsNullOrWhiteSpace(current?.OdataNextLink))
@@ -422,30 +340,33 @@ public class AzureManagementService : IAzureManagementService
             var items = current?.Value?.Select(MapToAzureUserDto).ToList() ?? new List<AzureUserDto>();
             var hasNext = !string.IsNullOrWhiteSpace(current?.OdataNextLink);
 
-            var totalItems = totalCount.HasValue ? (int)totalCount.Value : items.Count;
-            var totalPages = totalCount.HasValue
-                ? (int)Math.Ceiling((double)totalItems / pageSize)
-                : (hasNext ? page + 1 : page);
+            var total = totalCount.HasValue ? (int)totalCount.Value : items.Count;
+            var totalPages = total > 0 ? (int)Math.Ceiling(total / (double)pageSize) : 0;
 
-            _logger.LogInformation(
-                "Graph ListUsers Result: page={page}, pageSize={pageSize}, items={itemsCount}, totalCount={totalCount}, hasNext={hasNext}",
-                page, pageSize, items.Count, totalCount, hasNext
-            );
-
-            return new PagedResult<AzureUserDto>(
-                Items: items,
-                CurrentPage: page,
-                PageSize: pageSize,
-                TotalItems: totalItems,
-                TotalPages: totalPages,
-                HasNextPage: hasNext,
-                HasPreviousPage: page > 1
-            );
+            return new PagedResult<AzureUserDto>
+            {
+                Items = items,
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = total,
+                TotalPages = totalPages,
+                HasNextPage = hasNext,
+                HasPreviousPage = page > 1
+            };
         }
         catch (ServiceException ex)
         {
             _logger.LogError(ex, "Error al listar usuarios de Azure AD");
-            return new PagedResult<AzureUserDto>(new List<AzureUserDto>(), page, pageSize, 0, 0, false, false);
+            return new PagedResult<AzureUserDto>
+            {
+                Items = new List<AzureUserDto>(),
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = 0,
+                TotalPages = 0,
+                HasNextPage = false,
+                HasPreviousPage = false
+            };
         }
     }
 
@@ -477,8 +398,6 @@ public class AzureManagementService : IAzureManagementService
         };
 
         requestInfo.PathParameters.Clear();
-
-        // Importante: mantener ConsistencyLevel en las siguientes páginas también
         requestInfo.Headers.Add("ConsistencyLevel", "eventual");
 
         return await _graphClient.RequestAdapter.SendAsync(
@@ -494,7 +413,7 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            var tempPassword = GenerateSecurePasswordAsync().Result;
+            var tempPassword = await GenerateSecurePasswordAsync();
 
             var user = new GraphUser
             {
@@ -507,7 +426,6 @@ public class AzureManagementService : IAzureManagementService
 
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "ResetPasswordAzureUser",
@@ -516,14 +434,15 @@ public class AzureManagementService : IAzureManagementService
                 NewValues = $"ForceChange: {forceChange}",
                 Timestamp = DateTime.Now
             });
+
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Contraseña reseteada para usuario: {azureObjectId}");
+            _logger.LogInformation("Contraseña reseteada para usuario: {AzureObjectId}", azureObjectId);
             return tempPassword;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al resetear contraseña: {ex.Message}");
+            _logger.LogError(ex, "Error al resetear contraseña. AzureObjectId={AzureObjectId}", azureObjectId);
             throw new Exception($"Error al resetear contraseña: {ex.Message}", ex);
         }
     }
@@ -532,7 +451,6 @@ public class AzureManagementService : IAzureManagementService
     {
         try
         {
-            // Validar contraseña
             var validation = await ValidatePasswordPolicyAsync(newPassword);
             if (!validation.IsValid)
                 throw new ArgumentException($"Contraseña no cumple con la política: {string.Join(", ", validation.Errors)}");
@@ -548,7 +466,6 @@ public class AzureManagementService : IAzureManagementService
 
             await _graphClient.Users[azureObjectId].PatchAsync(user);
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "ChangePasswordAzureUser",
@@ -556,14 +473,15 @@ public class AzureManagementService : IAzureManagementService
                 EntityId = azureObjectId,
                 Timestamp = DateTime.Now
             });
+
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Contraseña cambiada para usuario: {azureObjectId}");
+            _logger.LogInformation("Contraseña cambiada para usuario: {AzureObjectId}", azureObjectId);
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al cambiar contraseña: {ex.Message}");
+            _logger.LogError(ex, "Error al cambiar contraseña. AzureObjectId={AzureObjectId}", azureObjectId);
             return false;
         }
     }
@@ -579,41 +497,14 @@ public class AzureManagementService : IAzureManagementService
             return Task.FromResult(new PasswordValidationResult(false, errors, 0, "Muy débil"));
         }
 
-        // Longitud mínima
-        if (password.Length < 8)
-            errors.Add("La contraseña debe tener al menos 8 caracteres");
-        else
-            score += 20;
+        if (password.Length < 8) errors.Add("La contraseña debe tener al menos 8 caracteres"); else score += 20;
+        if (!Regex.IsMatch(password, @"[A-Z]")) errors.Add("Debe contener al menos una mayúscula"); else score += 20;
+        if (!Regex.IsMatch(password, @"[a-z]")) errors.Add("Debe contener al menos una minúscula"); else score += 20;
+        if (!Regex.IsMatch(password, @"[0-9]")) errors.Add("Debe contener al menos un número"); else score += 20;
+        if (!Regex.IsMatch(password, @"[!@#$%^&*()_+\-=\[\]{};':""\\|,.<>\/?]")) errors.Add("Debe contener al menos un carácter especial"); else score += 20;
 
-        // Mayúsculas
-        if (!Regex.IsMatch(password, @"[A-Z]"))
-            errors.Add("La contraseña debe contener al menos una letra mayúscula");
-        else
-            score += 20;
-
-        // Minúsculas
-        if (!Regex.IsMatch(password, @"[a-z]"))
-            errors.Add("La contraseña debe contener al menos una letra minúscula");
-        else
-            score += 20;
-
-        // Números
-        if (!Regex.IsMatch(password, @"[0-9]"))
-            errors.Add("La contraseña debe contener al menos un número");
-        else
-            score += 20;
-
-        // Caracteres especiales
-        if (!Regex.IsMatch(password, @"[!@#$%^&*()_+\-=\[\]{};':""\\|,.<>\/?]"))
-            errors.Add("La contraseña debe contener al menos un carácter especial");
-        else
-            score += 20;
-
-        // Longitud adicional
-        if (password.Length >= 12)
-            score += 10;
-        if (password.Length >= 16)
-            score += 10;
+        if (password.Length >= 12) score += 10;
+        if (password.Length >= 16) score += 10;
 
         var strengthLevel = score switch
         {
@@ -624,12 +515,7 @@ public class AzureManagementService : IAzureManagementService
             _ => "Muy débil"
         };
 
-        return Task.FromResult(new PasswordValidationResult(
-            errors.Count == 0,
-            errors,
-            score,
-            strengthLevel
-        ));
+        return Task.FromResult(new PasswordValidationResult(errors.Count == 0, errors, score, strengthLevel));
     }
 
     public Task<string> GenerateSecurePasswordAsync()
@@ -640,34 +526,31 @@ public class AzureManagementService : IAzureManagementService
         const string special = "!@#$%^&*()_+-=[]{}";
 
         var password = new StringBuilder();
-        var random = RandomNumberGenerator.Create();
+        using var rng = RandomNumberGenerator.Create();
 
-        // Asegurar al menos un carácter de cada tipo
-        password.Append(GetRandomChar(uppercase, random));
-        password.Append(GetRandomChar(lowercase, random));
-        password.Append(GetRandomChar(digits, random));
-        password.Append(GetRandomChar(special, random));
+        password.Append(GetRandomChar(uppercase, rng));
+        password.Append(GetRandomChar(lowercase, rng));
+        password.Append(GetRandomChar(digits, rng));
+        password.Append(GetRandomChar(special, rng));
 
-        // Completar hasta 16 caracteres
         var allChars = uppercase + lowercase + digits + special;
         for (int i = 4; i < 16; i++)
-        {
-            password.Append(GetRandomChar(allChars, random));
-        }
+            password.Append(GetRandomChar(allChars, rng));
 
-        // Mezclar los caracteres
-        return Task.FromResult(new string(password.ToString().OrderBy(x => Guid.NewGuid()).ToArray()));
+        // Mezclar (si quieres shuffle criptográfico, se puede implementar aparte)
+        var mixed = new string(password.ToString().OrderBy(_ => Guid.NewGuid()).ToArray());
+        return Task.FromResult(mixed);
     }
 
-    private char GetRandomChar(string chars, RandomNumberGenerator random)
+    private static char GetRandomChar(string chars, RandomNumberGenerator rng)
     {
         var bytes = new byte[4];
-        random.GetBytes(bytes);
-        var index = BitConverter.ToUInt32(bytes, 0) % chars.Length;
+        rng.GetBytes(bytes);
+        var index = BitConverter.ToUInt32(bytes, 0) % (uint)chars.Length;
         return chars[(int)index];
     }
 
-    // ========== GESTIÓN DE ROLES DE DIRECTORIO ==========
+    // ========== ROLES ==========
 
     public async Task<IEnumerable<AzureRoleDto>> GetAllAzureDirectoryRolesAsync()
     {
@@ -686,52 +569,26 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al obtener roles de directorio: {ex.Message}");
+            _logger.LogError(ex, "Error al obtener roles de directorio");
             return Enumerable.Empty<AzureRoleDto>();
         }
     }
 
     public async Task<IEnumerable<AzureRoleDto>> GetUserAzureRolesAsync(string azureObjectId)
     {
-        //try
-        //{
-        //    var memberOf = await _graphClient.Users[azureObjectId].MemberOf.GetAsync();
-
-        //    var roles = memberOf?.Value?
-        //        .OfType<DirectoryRole>()
-        //        .Select(r => new AzureRoleDto(
-        //            Id: r.Id!,
-        //            DisplayName: r.DisplayName!,
-        //            Description: r.Description,
-        //            IsBuiltIn: true,
-        //            RoleTemplateId: r.RoleTemplateId,
-        //            RolePermissions: null
-        //        )) ?? Enumerable.Empty<AzureRoleDto>();
-
-        //    return roles;
-        //}
-        //catch (ServiceException ex)
-        //{
-        //    _logger.LogError($"Error al obtener roles del usuario: {ex.Message}");
-        //    return Enumerable.Empty<AzureRoleDto>();
-        //}
-
         try
         {
             var results = new List<AzureRoleDto>();
 
-            // Primera página
             var page = await _graphClient.Users[azureObjectId].MemberOf.GetAsync(config =>
             {
-                // Puedes pedir campos útiles
                 config.QueryParameters.Select = new[] { "id", "displayName", "description" };
             });
 
             while (page?.Value != null)
             {
                 foreach (var obj in page.Value)
-                {                    
-                    // Grupos (lo de tu captura)
+                {
                     if (obj is Microsoft.Graph.Models.Group g)
                     {
                         results.Add(new AzureRoleDto(
@@ -743,7 +600,6 @@ public class AzureManagementService : IAzureManagementService
                             RolePermissions: null
                         ));
                     }
-                    // Roles de Azure AD (si existiera)
                     else if (obj is DirectoryRole r)
                     {
                         results.Add(new AzureRoleDto(
@@ -757,7 +613,6 @@ public class AzureManagementService : IAzureManagementService
                     }
                 }
 
-                // Paginación
                 if (string.IsNullOrEmpty(page.OdataNextLink))
                     break;
 
@@ -770,12 +625,12 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ODataError ex)
         {
-            _logger.LogError($"Error Graph al obtener miembros (roles/grupos) del usuario: {ex.Error?.Message}");
+            _logger.LogError("Error Graph al obtener miembros del usuario: {Message}", ex.Error?.Message);
             return Enumerable.Empty<AzureRoleDto>();
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Error al obtener miembros del usuario: {ex.Message}");
+            _logger.LogError(ex, "Error al obtener miembros del usuario");
             return Enumerable.Empty<AzureRoleDto>();
         }
     }
@@ -791,7 +646,6 @@ public class AzureManagementService : IAzureManagementService
 
             await _graphClient.DirectoryRoles[roleId].Members.Ref.PostAsync(requestBody);
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "AssignAzureRole",
@@ -802,12 +656,11 @@ public class AzureManagementService : IAzureManagementService
             });
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Rol {roleId} asignado a usuario {azureObjectId}");
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al asignar rol: {ex.Message}");
+            _logger.LogError(ex, "Error al asignar rol. RoleId={RoleId}, AzureObjectId={AzureObjectId}", roleId, azureObjectId);
             return false;
         }
     }
@@ -818,7 +671,6 @@ public class AzureManagementService : IAzureManagementService
         {
             await _graphClient.DirectoryRoles[roleId].Members[azureObjectId].Ref.DeleteAsync();
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "RemoveAzureRole",
@@ -829,12 +681,11 @@ public class AzureManagementService : IAzureManagementService
             });
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Rol {roleId} removido de usuario {azureObjectId}");
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al remover rol: {ex.Message}");
+            _logger.LogError(ex, "Error al remover rol. RoleId={RoleId}, AzureObjectId={AzureObjectId}", roleId, azureObjectId);
             return false;
         }
     }
@@ -845,20 +696,18 @@ public class AzureManagementService : IAzureManagementService
         {
             var members = await _graphClient.DirectoryRoles[roleId].Members.GetAsync();
 
-            var users = members?.Value?
+            return members?.Value?
                 .OfType<GraphUser>()
                 .Select(MapToAzureUserDto) ?? Enumerable.Empty<AzureUserDto>();
-
-            return users;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al obtener miembros del rol: {ex.Message}");
+            _logger.LogError(ex, "Error al obtener miembros del rol. RoleId={RoleId}", roleId);
             return Enumerable.Empty<AzureUserDto>();
         }
     }
 
-    // ========== GESTIÓN DE GRUPOS ==========
+    // ========== GRUPOS ==========
 
     public async Task<AzureGroupDto> CreateGroupInAzureAsync(CreateAzureGroupDto dto)
     {
@@ -868,19 +717,17 @@ public class AzureManagementService : IAzureManagementService
             {
                 DisplayName = dto.DisplayName,
                 Description = dto.Description,
-                MailNickname = dto.MailNickname ?? dto.DisplayName.Replace(" ", "").ToLower(),
+                MailNickname = dto.MailNickname ?? dto.DisplayName.Replace(" ", "").ToLowerInvariant(),
                 MailEnabled = dto.MailEnabled,
                 SecurityEnabled = dto.SecurityEnabled,
                 GroupTypes = dto.GroupType == "Microsoft365" ? new List<string> { "Unified" } : new List<string>()
             };
 
             var createdGroup = await _graphClient.Groups.PostAsync(group);
-
             if (createdGroup == null)
                 throw new Exception("Error al crear grupo en Azure AD");
 
-            // Agregar owners si se proporcionan
-            if (dto.Owners != null && dto.Owners.Any())
+            if (dto.Owners is { Count: > 0 })
             {
                 foreach (var ownerId in dto.Owners)
                 {
@@ -894,21 +741,17 @@ public class AzureManagementService : IAzureManagementService
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning($"Error al agregar owner {ownerId}: {ex.Message}");
+                        _logger.LogWarning(ex, "Error al agregar owner {OwnerId}", ownerId);
                     }
                 }
             }
 
-            // Agregar members si se proporcionan
-            if (dto.Members != null && dto.Members.Any())
+            if (dto.Members is { Count: > 0 })
             {
                 foreach (var memberId in dto.Members)
-                {
                     await AddUserToAzureGroupAsync(createdGroup.Id!, memberId);
-                }
             }
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "CreateAzureGroup",
@@ -918,8 +761,6 @@ public class AzureManagementService : IAzureManagementService
                 Timestamp = DateTime.Now
             });
             await _context.SaveChangesAsync();
-
-            _logger.LogInformation($"Grupo creado en Azure AD: {dto.DisplayName}");
 
             return new AzureGroupDto(
                 Id: createdGroup.Id!,
@@ -937,7 +778,7 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al crear grupo: {ex.Message}");
+            _logger.LogError(ex, "Error al crear grupo");
             throw new Exception($"Error al crear grupo: {ex.Message}", ex);
         }
     }
@@ -948,15 +789,15 @@ public class AzureManagementService : IAzureManagementService
         {
             var group = await _graphClient.Groups[groupId].GetAsync(config =>
             {
-                config.QueryParameters.Select = new[] {
-                    "id", "displayName", "description", "mail", "mailNickname",
-                    "mailEnabled", "securityEnabled", "groupTypes", "createdDateTime"
+                config.QueryParameters.Select = new[]
+                {
+                    "id","displayName","description","mail","mailNickname",
+                    "mailEnabled","securityEnabled","groupTypes","createdDateTime"
                 };
             });
 
             if (group == null) return null;
 
-            // Obtener cantidad de miembros
             var members = await _graphClient.Groups[groupId].Members.GetAsync();
             var memberCount = members?.Value?.Count ?? 0;
 
@@ -976,7 +817,7 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al obtener grupo: {ex.Message}");
+            _logger.LogError(ex, "Error al obtener grupo. GroupId={GroupId}", groupId);
             return null;
         }
     }
@@ -994,7 +835,6 @@ public class AzureManagementService : IAzureManagementService
 
             await _graphClient.Groups[groupId].PatchAsync(group);
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "UpdateAzureGroup",
@@ -1009,7 +849,7 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al actualizar grupo: {ex.Message}");
+            _logger.LogError(ex, "Error al actualizar grupo. GroupId={GroupId}", groupId);
             return null;
         }
     }
@@ -1020,7 +860,6 @@ public class AzureManagementService : IAzureManagementService
         {
             await _graphClient.Groups[groupId].DeleteAsync();
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "DeleteAzureGroup",
@@ -1030,73 +869,84 @@ public class AzureManagementService : IAzureManagementService
             });
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Grupo eliminado: {groupId}");
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al eliminar grupo: {ex.Message}");
+            _logger.LogError(ex, "Error al eliminar grupo. GroupId={GroupId}", groupId);
             return false;
         }
     }
 
-    public async Task<PagedResult<AzureGroupDto>> ListGroupsFromAzureAsync(int page = 1, int pageSize = 50, string? filter = null)
+    public async Task<PagedResult<AzureGroupDto>> ListGroupsFromAzureAsync(int page = 1, int pageSize = DefaultPageSize, string? filter = null)
     {
         try
         {
+            NormalizePaging(ref page, ref pageSize);
+
             var groups = await _graphClient.Groups.GetAsync(config =>
             {
                 config.QueryParameters.Top = pageSize;
+
                 if (!string.IsNullOrWhiteSpace(filter))
-                {
                     config.QueryParameters.Filter = filter;
-                }
-                config.QueryParameters.Select = new[] {
-                    "id", "displayName", "description", "mail", "mailEnabled",
-                    "securityEnabled", "groupTypes", "createdDateTime"
+
+                config.QueryParameters.Select = new[]
+                {
+                    "id","displayName","description","mail","mailEnabled",
+                    "securityEnabled","groupTypes","createdDateTime"
                 };
                 config.QueryParameters.Orderby = new[] { "displayName" };
             });
 
-            var groupDtos = new List<AzureGroupDto>();
+            var items = new List<AzureGroupDto>();
             if (groups?.Value != null)
             {
-                foreach (var group in groups.Value)
+                foreach (var g in groups.Value)
                 {
-                    groupDtos.Add(new AzureGroupDto(
-                        Id: group.Id!,
-                        DisplayName: group.DisplayName!,
-                        Description: group.Description,
-                        Mail: group.Mail,
-                        MailNickname: group.MailNickname,
-                        MailEnabled: group.MailEnabled ?? false,
-                        SecurityEnabled: group.SecurityEnabled ?? false,
-                        GroupType: group.GroupTypes?.Contains("Unified") == true ? "Microsoft365" : "Security",
-                        CreatedDateTime: group.CreatedDateTime?.DateTime,
+                    items.Add(new AzureGroupDto(
+                        Id: g.Id!,
+                        DisplayName: g.DisplayName!,
+                        Description: g.Description,
+                        Mail: g.Mail,
+                        MailNickname: g.MailNickname,
+                        MailEnabled: g.MailEnabled ?? false,
+                        SecurityEnabled: g.SecurityEnabled ?? false,
+                        GroupType: g.GroupTypes?.Contains("Unified") == true ? "Microsoft365" : "Security",
+                        CreatedDateTime: g.CreatedDateTime?.DateTime,
                         MemberCount: 0,
-                        GroupTypes: group.GroupTypes?.ToList()
+                        GroupTypes: g.GroupTypes?.ToList()
                     ));
                 }
             }
 
-            var totalCount = groups?.OdataCount ?? groupDtos.Count;
+            var total = (int)(groups?.OdataCount ?? items.Count);
+            var totalPages = total > 0 ? (int)Math.Ceiling(total / (double)pageSize) : 0;
 
-            return new PagedResult<AzureGroupDto>(
-                Items: groupDtos,
-                CurrentPage: page,
-                PageSize: pageSize,
-                TotalItems: (int)totalCount,
-                TotalPages: (int)Math.Ceiling((double)totalCount / pageSize),
-                HasNextPage: page * pageSize < totalCount,
-                HasPreviousPage: page > 1
-            );
+            return new PagedResult<AzureGroupDto>
+            {
+                Items = items,
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = total,
+                TotalPages = totalPages,
+                HasNextPage = totalPages > 0 && page < totalPages,
+                HasPreviousPage = page > 1
+            };
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al listar grupos: {ex.Message}");
-            return new PagedResult<AzureGroupDto>(
-                new List<AzureGroupDto>(), page, pageSize, 0, 0, false, false
-            );
+            _logger.LogError(ex, "Error al listar grupos");
+            return new PagedResult<AzureGroupDto>
+            {
+                Items = new List<AzureGroupDto>(),
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = 0,
+                TotalPages = 0,
+                HasNextPage = false,
+                HasPreviousPage = false
+            };
         }
     }
 
@@ -1111,7 +961,6 @@ public class AzureManagementService : IAzureManagementService
 
             await _graphClient.Groups[groupId].Members.Ref.PostAsync(requestBody);
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "AddUserToAzureGroup",
@@ -1122,12 +971,11 @@ public class AzureManagementService : IAzureManagementService
             });
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Usuario {azureObjectId} agregado al grupo {groupId}");
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al agregar usuario al grupo: {ex.Message}");
+            _logger.LogError(ex, "Error al agregar usuario al grupo. GroupId={GroupId}, AzureObjectId={AzureObjectId}", groupId, azureObjectId);
             return false;
         }
     }
@@ -1138,7 +986,6 @@ public class AzureManagementService : IAzureManagementService
         {
             await _graphClient.Groups[groupId].Members[azureObjectId].Ref.DeleteAsync();
 
-            // Auditoría
             await _context.AuditLogs.AddAsync(new AuditLog
             {
                 Action = "RemoveUserFromAzureGroup",
@@ -1149,12 +996,11 @@ public class AzureManagementService : IAzureManagementService
             });
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation($"Usuario {azureObjectId} removido del grupo {groupId}");
             return true;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al remover usuario del grupo: {ex.Message}");
+            _logger.LogError(ex, "Error al remover usuario del grupo. GroupId={GroupId}, AzureObjectId={AzureObjectId}", groupId, azureObjectId);
             return false;
         }
     }
@@ -1165,65 +1011,31 @@ public class AzureManagementService : IAzureManagementService
         {
             var members = await _graphClient.Groups[groupId].Members.GetAsync();
 
-            var users = members?.Value?
+            return members?.Value?
                 .OfType<GraphUser>()
                 .Select(MapToAzureUserDto) ?? Enumerable.Empty<AzureUserDto>();
-
-            return users;
         }
         catch (ServiceException ex)
         {
-            _logger.LogError($"Error al obtener miembros del grupo: {ex.Message}");
+            _logger.LogError(ex, "Error al obtener miembros del grupo. GroupId={GroupId}", groupId);
             return Enumerable.Empty<AzureUserDto>();
         }
     }
-
-    //public async Task<IEnumerable<AzureGroupDto>> GetUserAzureGroupsAsync(string azureObjectId)
-    //{
-    //    try
-    //    {
-    //        var memberOf = await _graphClient.Users[azureObjectId].MemberOf.GetAsync();
-
-    //        var groups = memberOf?.Value?
-    //            .OfType<GraphGroup>()
-    //            .Select(g => new AzureGroupDto(
-    //                Id: g.Id!,
-    //                DisplayName: g.DisplayName!,
-    //                Description: g.Description,
-    //                Mail: g.Mail,
-    //                MailNickname: g.MailNickname,
-    //                MailEnabled: g.MailEnabled ?? false,
-    //                SecurityEnabled: g.SecurityEnabled ?? false,
-    //                GroupType: g.GroupTypes?.Contains("Unified") == true ? "Microsoft365" : "Security",
-    //                CreatedDateTime: g.CreatedDateTime?.DateTime,
-    //                MemberCount: 0,
-    //                GroupTypes: g.GroupTypes?.ToList()
-    //            )) ?? Enumerable.Empty<AzureGroupDto>();
-
-    //        return groups;
-    //    }
-    //    catch (ServiceException ex)
-    //    {
-    //        _logger.LogError($"Error al obtener grupos del usuario: {ex.Message}");
-    //        return Enumerable.Empty<AzureGroupDto>();
-    //    }
-    //}
 
     public async Task<IEnumerable<AzureGroupDto>> GetUserAzureGroupsAsync(string azureObjectId)
     {
         try
         {
-            // Si quieres incluir grupos anidados, usa TransitiveMemberOf.GraphGroup
-            // var page = await _graphClient.Users[azureObjectId].TransitiveMemberOf.GraphGroup.GetAsync(...)
-            _logger.LogInformation($"Obteniendo grupos del usuario {azureObjectId} desde Azure AD");
+            _logger.LogInformation("Obteniendo grupos del usuario {AzureObjectId} desde Azure AD", azureObjectId);
+
             var page = await _graphClient.Users[azureObjectId].MemberOf.GraphGroup.GetAsync(cfg =>
             {
                 cfg.QueryParameters.Select = new[]
                 {
-                "id","displayName","description","mail","mailNickname",
-                "mailEnabled","securityEnabled","groupTypes","createdDateTime"
-            };
-                cfg.QueryParameters.Top = 999; // tamaño de página
+                    "id","displayName","description","mail","mailNickname",
+                    "mailEnabled","securityEnabled","groupTypes","createdDateTime"
+                };
+                cfg.QueryParameters.Top = 999;
             });
 
             var allGroups = new List<GraphGroup>();
@@ -1234,7 +1046,6 @@ public class AzureManagementService : IAzureManagementService
                 if (string.IsNullOrWhiteSpace(page.OdataNextLink))
                     break;
 
-                // seguir nextLink manualmente
                 var requestInfo = new RequestInformation
                 {
                     HttpMethod = Method.GET,
@@ -1249,7 +1060,6 @@ public class AzureManagementService : IAzureManagementService
                 );
             }
 
-            // 🔎 Filtro estilo AD: solo grupos que empiecen por "Rol"
             var filtered = allGroups
                 .Where(g => !string.IsNullOrWhiteSpace(g.DisplayName))
                 .Where(g => g.DisplayName!.StartsWith("Rol", StringComparison.OrdinalIgnoreCase));
@@ -1270,11 +1080,10 @@ public class AzureManagementService : IAzureManagementService
         }
         catch (ServiceException ex)
         {
-            _logger.LogError(ex, $"Error al obtener grupos del usuario: {ex.Message}");
+            _logger.LogError(ex, "Error al obtener grupos del usuario. AzureObjectId={AzureObjectId}", azureObjectId);
             return Enumerable.Empty<AzureGroupDto>();
         }
     }
-
 
     // ========== OPERACIONES MASIVAS ==========
 
@@ -1326,8 +1135,7 @@ public class AzureManagementService : IAzureManagementService
             try
             {
                 var result = await AddUserToAzureGroupAsync(groupId, userId);
-                if (result)
-                    successful++;
+                if (result) successful++;
                 else
                 {
                     failed++;
@@ -1438,6 +1246,13 @@ public class AzureManagementService : IAzureManagementService
 
     // ========== MÉTODOS AUXILIARES ==========
 
+    private static void NormalizePaging(ref int page, ref int pageSize)
+    {
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = DefaultPageSize;
+        if (pageSize > MaxPageSize) pageSize = MaxPageSize;
+    }
+
     private AzureUserDto MapToAzureUserDto(GraphUser user)
     {
         return new AzureUserDto(
@@ -1467,7 +1282,7 @@ public class AzureManagementService : IAzureManagementService
         );
     }
 
-    private bool IsValidEmail(string email)
+    private static bool IsValidEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email))
             return false;
@@ -1482,24 +1297,4 @@ public class AzureManagementService : IAzureManagementService
             return false;
         }
     }
-
-    //private async Task<UserCollectionResponse?> GetUsersByNextLinkAsync(string nextLink)
-    //{
-    //    if (string.IsNullOrWhiteSpace(nextLink)) return null;
-
-    //    var requestInfo = new RequestInformation
-    //    {
-    //        HttpMethod = Method.GET,
-    //        UrlTemplate = nextLink
-    //    };
-
-    //    // Es URL completa, no template con placeholders
-    //    requestInfo.PathParameters.Clear();
-
-    //    return await _graphClient.RequestAdapter.SendAsync(
-    //        requestInfo,
-    //        UserCollectionResponse.CreateFromDiscriminatorValue,
-    //        default
-    //    );
-    //}
 }

@@ -321,13 +321,33 @@ public record SyncResult(
     TimeSpan Duration
 );
 
+//PagedRequestDto
+//public class PagedRequestDto
+//{
+//    public int Page { get; set; } = 1;
+//    public int PageSize { get; set; } = 20;
+//    public string? SortBy { get; set; }
+//    public string? SortDirection { get; set; } = "asc"; // "asc" | "desc"
+//    public string? Search { get; set; } // opcional
+//}
+
 // Resultado paginado
-public record PagedResult<T>(
-    List<T> Items,
-    int CurrentPage,
-    int PageSize,
-    int TotalItems,
-    int TotalPages,
-    bool HasNextPage,
-    bool HasPreviousPage
-);
+//public record PagedResult<T>(
+//    List<T> Items,
+//    int CurrentPage,
+//    int PageSize,
+//    int TotalItems,
+//    int TotalPages,
+//    bool HasNextPage,
+//    bool HasPreviousPage
+//);
+//public class PagedResult<T>
+//{
+//    public List<T> Items { get; set; } = new();
+//    public int Page { get; set; }
+//    public int PageSize { get; set; }
+//    public int TotalCount { get; set; }
+//    public int TotalPages { get; set; }
+//    public bool HasPreviousPage { get; set; }
+//    public bool HasNextPage { get; set; }
+//}
