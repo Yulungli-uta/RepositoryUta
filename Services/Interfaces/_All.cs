@@ -60,8 +60,13 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     Task CleanupInactiveConnectionsAsync(int inactiveMinutes = 60);
   }
 
-  // CRUD genérico para todas las entidades
-  public interface ICrudService<TEntity, TCreate, TUpdate> where TEntity: class
+    public interface IUserRegistrationService
+    {
+        Task<object> CreateUserWithEmployeeAsync(CreateUserDto dto);
+    }
+
+    // CRUD genérico para todas las entidades
+    public interface ICrudService<TEntity, TCreate, TUpdate> where TEntity: class
   {
     Task<IEnumerable<TEntity>> ListAsync(int page,int size);
     Task<TEntity?> GetAsync(params object[] key);

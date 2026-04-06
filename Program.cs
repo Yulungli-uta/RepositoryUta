@@ -1,26 +1,26 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Azure.Identity;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Graph;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using Microsoft.Graph;
-using Azure.Identity;
 using Serilog;
 using Serilog.Events;
 using System.Text;
 using System.Threading.RateLimiting;
-
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
+using WsSeguUta.AuthSystem.API.Hubs;
 using WsSeguUta.AuthSystem.API.Infrastructure.Mapping;
 using WsSeguUta.AuthSystem.API.Infrastructure.Validation;
 using WsSeguUta.AuthSystem.API.Middleware;
 using WsSeguUta.AuthSystem.API.Services;
 using WsSeguUta.AuthSystem.API.Services.Implementations;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
-using WsSeguUta.AuthSystem.API.Hubs;
+using static WebSocketConnectionService;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -198,6 +198,7 @@ builder.Services.AddScoped<IAppAuthService, AppAuthService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IWebSocketConnectionService, WebSocketConnectionService>();
 builder.Services.AddScoped<IUserPermissionService, UserPermissionService>();
+builder.Services.AddScoped<IUserRegistrationService, UserRegistrationService>();
 
 // =========================================================
 // Azure Management Service

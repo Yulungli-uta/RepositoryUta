@@ -18,15 +18,18 @@ public class UsersController : ControllerBase
     private readonly ICrudService<User, CreateUserDto, UpdateUserDto> _svc;
     private readonly AuthDbContext _context;
     private readonly IUserPermissionService _permissionService;
+    private readonly IUserRegistrationService _userRegistrationService;
 
     public UsersController(
         ICrudService<User, CreateUserDto, UpdateUserDto> svc,
         AuthDbContext context,
-        IUserPermissionService permissionService)
+        IUserPermissionService permissionService,
+        IUserRegistrationService userRegistrationService)
     {
         _svc = svc;
         _context = context;
         _permissionService = permissionService;
+        _userRegistrationService = userRegistrationService;
     }
 
     [HttpGet]
@@ -37,9 +40,27 @@ public class UsersController : ControllerBase
     public async Task<IActionResult> Get(Guid id)
         => (await _svc.GetAsync(id)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
 
+    //[HttpPost]
+    //public async Task<IActionResult> Create([FromBody] CreateUserDto dto)
+    //    => Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateUserDto dto)
-        => Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
+    {
+        try
+        {
+            var result = await _userRegistrationService.CreateUserWithEmployeeAsync(dto);
+            return Ok(ApiResponse.Ok(result));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ApiResponse.Fail(ex.Message));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, ApiResponse.Fail($"Error interno: {ex.Message}"));
+        }
+    }
 
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserDto dto)
