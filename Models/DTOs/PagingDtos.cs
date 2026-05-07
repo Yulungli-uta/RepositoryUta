@@ -20,37 +20,37 @@
         }
     }
 
-    // Resultado paginado (alineado a frontend)
-    // Recomendación: usar class inmutable o record; aquí dejamos class pero controlado.
+    /// <summary>
+    /// Resultado genérico paginado. TotalPages, HasPreviousPage y HasNextPage
+    /// se calculan automáticamente a partir de TotalCount y PageSize.
+    /// </summary>
     public sealed class PagedResult<T>
     {
-        public required List<T> Items { get; init; }
+        public required IReadOnlyList<T> Items { get; init; }
         public required int Page { get; init; }
         public required int PageSize { get; init; }
-        public required int TotalCount { get; init; }
-        public required int TotalPages { get; init; }
-        public required bool HasPreviousPage { get; init; }
-        public required bool HasNextPage { get; init; }
+        public required long TotalCount { get; init; }
 
-        public static PagedResult<T> Create(
-            List<T> items,
-            int page,
-            int pageSize,
-            int totalCount)
+        public int TotalPages => PageSize > 0 ? (int)Math.Ceiling((double)TotalCount / PageSize) : 0;
+        public bool HasPreviousPage => Page > 1;
+        public bool HasNextPage => Page < TotalPages;
+
+        /// <summary>Resultado vacío para la página solicitada.</summary>
+        public static PagedResult<T> Empty(int page, int pageSize) => new()
         {
-            var totalPages = totalCount <= 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageSize);
-            var normalizedPage = totalPages > 0 ? Math.Min(Math.Max(page, 1), totalPages) : 1;
+            Items = [],
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = 0
+        };
 
-            return new PagedResult<T>
-            {
-                Items = items,
-                Page = normalizedPage,
-                PageSize = pageSize,
-                TotalCount = totalCount,
-                TotalPages = totalPages,
-                HasPreviousPage = normalizedPage > 1,
-                HasNextPage = totalPages > 0 && normalizedPage < totalPages
-            };
-        }
+        /// <summary>Crea un resultado paginado con los datos proporcionados.</summary>
+        public static PagedResult<T> Create(IReadOnlyList<T> items, int page, int pageSize, long totalCount) => new()
+        {
+            Items = items,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount
+        };
     }
 }

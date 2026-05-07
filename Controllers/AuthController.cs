@@ -318,6 +318,10 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse.Ok(result, result.IsValid ? "Token válido" : "Token inválido"));
     }
 
+    /// <summary>
+    /// Cambio de contraseña simple: requiere contraseña actual + nueva.
+    /// Mínimo 8 caracteres, una mayúscula y un número.
+    /// </summary>
     [HttpPost("change-password")]
     [Authorize]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest req)
@@ -329,14 +333,58 @@ public class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.CurrentPassword) || string.IsNullOrWhiteSpace(req.NewPassword))
             return BadRequest(ApiResponse.Fail("Las contraseñas son requeridas"));
 
-        if (req.NewPassword.Length < 8)
-            return BadRequest(ApiResponse.Fail("La nueva contraseña debe tener al menos 8 caracteres"));
-
         var success = await _auth.ChangePasswordAsync(userId, req.CurrentPassword, req.NewPassword);
-        
+
         if (!success)
-            return BadRequest(ApiResponse.Fail("No se pudo cambiar la contraseña. Verifique que la contraseña actual sea correcta y que sea un usuario local."));
+            return BadRequest(ApiResponse.Fail("No se pudo cambiar la contraseña. Verifique que la contraseña actual sea correcta, que sea usuario local, y que la nueva cumpla los requisitos (mín. 8 caracteres, una mayúscula, un número)."));
 
         return Ok(ApiResponse.Ok(new ChangePasswordResponse(true, "Contraseña cambiada exitosamente")));
+    }
+
+    /// <summary>
+    /// Paso 1 del cambio de contraseña con doble factor: genera un OTP de 6 dígitos válido 10 minutos.
+    /// En producción el código llega por email/SMS. En desarrollo se retorna en la respuesta.
+    /// </summary>
+    [HttpPost("request-password-change-2fa")]
+    [Authorize]
+    public async Task<IActionResult> RequestPasswordChange2FA()
+    {
+        var sub = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(sub, out var userId))
+            return Unauthorized(ApiResponse.Fail("Token inválido"));
+
+        var isDev = HttpContext.RequestServices
+            .GetRequiredService<IWebHostEnvironment>().IsDevelopment();
+
+        var result = await _auth.RequestPasswordChange2FAAsync(userId, isDev);
+
+        if (!result.Success)
+            return BadRequest(ApiResponse.Fail(result.Message));
+
+        return Ok(ApiResponse.Ok(result, result.Message));
+    }
+
+    /// <summary>
+    /// Paso 2 del cambio de contraseña con doble factor: verifica OTP + contraseña actual y aplica el cambio.
+    /// </summary>
+    [HttpPost("change-password-2fa")]
+    [Authorize]
+    public async Task<IActionResult> ChangePasswordWith2FA([FromBody] ChangePasswordWith2FARequest req)
+    {
+        var sub = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(sub, out var userId))
+            return Unauthorized(ApiResponse.Fail("Token inválido"));
+
+        if (string.IsNullOrWhiteSpace(req.CurrentPassword) ||
+            string.IsNullOrWhiteSpace(req.NewPassword) ||
+            string.IsNullOrWhiteSpace(req.OtpCode))
+            return BadRequest(ApiResponse.Fail("Todos los campos son requeridos"));
+
+        var result = await _auth.ChangePasswordWith2FAAsync(userId, req.CurrentPassword, req.NewPassword, req.OtpCode);
+
+        if (!result.Success)
+            return BadRequest(ApiResponse.Fail(result.Message));
+
+        return Ok(ApiResponse.Ok(result, result.Message));
     }
 }

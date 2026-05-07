@@ -340,33 +340,13 @@ public class AzureManagementService : IAzureManagementService
             var items = current?.Value?.Select(MapToAzureUserDto).ToList() ?? new List<AzureUserDto>();
             var hasNext = !string.IsNullOrWhiteSpace(current?.OdataNextLink);
 
-            var total = totalCount.HasValue ? (int)totalCount.Value : items.Count;
-            var totalPages = total > 0 ? (int)Math.Ceiling(total / (double)pageSize) : 0;
-
-            return new PagedResult<AzureUserDto>
-            {
-                Items = items,
-                Page = page,
-                PageSize = pageSize,
-                TotalCount = total,
-                TotalPages = totalPages,
-                HasNextPage = hasNext,
-                HasPreviousPage = page > 1
-            };
+            var total = totalCount.HasValue ? totalCount.Value : (long)items.Count;
+            return PagedResult<AzureUserDto>.Create(items, page, pageSize, total);
         }
         catch (ServiceException ex)
         {
             _logger.LogError(ex, "Error al listar usuarios de Azure AD");
-            return new PagedResult<AzureUserDto>
-            {
-                Items = new List<AzureUserDto>(),
-                Page = page,
-                PageSize = pageSize,
-                TotalCount = 0,
-                TotalPages = 0,
-                HasNextPage = false,
-                HasPreviousPage = false
-            };
+            return PagedResult<AzureUserDto>.Empty(page, pageSize);
         }
     }
 
@@ -920,33 +900,13 @@ public class AzureManagementService : IAzureManagementService
                 }
             }
 
-            var total = (int)(groups?.OdataCount ?? items.Count);
-            var totalPages = total > 0 ? (int)Math.Ceiling(total / (double)pageSize) : 0;
-
-            return new PagedResult<AzureGroupDto>
-            {
-                Items = items,
-                Page = page,
-                PageSize = pageSize,
-                TotalCount = total,
-                TotalPages = totalPages,
-                HasNextPage = totalPages > 0 && page < totalPages,
-                HasPreviousPage = page > 1
-            };
+            var total = groups?.OdataCount ?? (long)items.Count;
+            return PagedResult<AzureGroupDto>.Create(items, page, pageSize, total);
         }
         catch (ServiceException ex)
         {
             _logger.LogError(ex, "Error al listar grupos");
-            return new PagedResult<AzureGroupDto>
-            {
-                Items = new List<AzureGroupDto>(),
-                Page = page,
-                PageSize = pageSize,
-                TotalCount = 0,
-                TotalPages = 0,
-                HasNextPage = false,
-                HasPreviousPage = false
-            };
+            return PagedResult<AzureGroupDto>.Empty(page, pageSize);
         }
     }
 

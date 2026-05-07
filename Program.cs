@@ -14,13 +14,16 @@ using System.Threading.RateLimiting;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Hubs;
+using WsSeguUta.AuthSystem.API.Infrastructure.Identity;
+using WsSeguUta.AuthSystem.API.Infrastructure.Identity.Contracts;
+using WsSeguUta.AuthSystem.API.Infrastructure.Identity.EntraId;
+using WsSeguUta.AuthSystem.API.Infrastructure.Identity.LocalAd;
 using WsSeguUta.AuthSystem.API.Infrastructure.Mapping;
 using WsSeguUta.AuthSystem.API.Infrastructure.Validation;
 using WsSeguUta.AuthSystem.API.Middleware;
 using WsSeguUta.AuthSystem.API.Services;
 using WsSeguUta.AuthSystem.API.Services.Implementations;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
-using static WebSocketConnectionService;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,6 +34,8 @@ builder.Host.ConfigureAppConfiguration((hostingContext, config) =>
 {
     config.SetBasePath(Directory.GetCurrentDirectory());
     config.AddJsonFile("Configuration/appsettings.json", optional: false, reloadOnChange: true);
+    if (hostingContext.HostingEnvironment.IsDevelopment())
+        config.AddUserSecrets<Program>(optional: true);
     config.AddEnvironmentVariables();
 });
 
@@ -78,29 +83,31 @@ var cors = builder.Configuration.GetSection("Cors");
 var corsName = cors["PolicyName"] ?? "Frontend";
 var origins = cors.GetSection("Origins").Get<string[]>() ?? Array.Empty<string>();
 var allowCred = bool.TryParse(cors["AllowCredentials"], out var ac) && ac;
+var allowedHeaders = cors.GetSection("AllowedHeaders").Get<string[]>();
+var allowedMethods = cors.GetSection("AllowedMethods").Get<string[]>();
 
 builder.Services.AddCors(opt =>
 {
     opt.AddPolicy(corsName, policy =>
     {
         if (origins.Length > 0)
-        {
             policy.WithOrigins(origins);
-        }
         else
-        {
-            // Evita dejar esto abierto en prod si AllowCredentials = true
             policy.AllowAnyOrigin();
-        }
 
-        // Recomendado para evitar errores por headers (SignalR + navegadores)
-        policy.AllowAnyHeader();
-        policy.AllowAnyMethod();
+        if (allowedHeaders is { Length: > 0 })
+            policy.WithHeaders(allowedHeaders);
+        else
+            policy.AllowAnyHeader();
+
+        if (allowedMethods is { Length: > 0 })
+            policy.WithMethods(allowedMethods);
+        else
+            policy.AllowAnyMethod();
 
         if (allowCred)
             policy.AllowCredentials();
 
-        // Opcional: cache de preflight (reduce OPTIONS)
         policy.SetPreflightMaxAge(TimeSpan.FromHours(12));
     });
 });
@@ -126,7 +133,11 @@ builder.Services.AddRateLimiter(options =>
 // =========================================================
 // JWT
 // =========================================================
-var jwtKey = builder.Configuration["Jwt:Key"] ?? "cambia-esta-clave-larga-segura";
+var jwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
+    throw new InvalidOperationException(
+        "Jwt:Key debe configurarse como variable de entorno con al menos 32 caracteres. No usar valores por defecto en producción.");
+
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "WsSeguUta.AuthSystem.API";
 var jwtAud = builder.Configuration["Jwt:Audience"] ?? "WsSeguUta.AuthSystem.API";
 
@@ -134,7 +145,7 @@ builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
     {
-        o.RequireHttpsMetadata = false;
+        o.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
         o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -213,19 +224,35 @@ builder.Services.AddSingleton<GraphServiceClient>(sp =>
     var tenantId = config["AzureAd:TenantId"];
     var clientId = config["AzureAd:ClientId"];
     var clientSecret = config["AzureAd:ClientSecret"];
-    
+
     if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
-    {
-        throw new InvalidOperationException("Azure AD configuration is missing. Please configure AzureAd:TenantId, AzureAd:ClientId, and AzureAd:ClientSecret in appsettings.json");
-    }
-    
-    var options = new Azure.Identity.ClientSecretCredentialOptions
-    {
-        AuthorityHost = Azure.Identity.AzureAuthorityHosts.AzurePublicCloud
-    };
-    
-    var credential = new Azure.Identity.ClientSecretCredential(tenantId, clientId, clientSecret, options);
+        throw new InvalidOperationException("Azure AD configuration is missing: AzureAd:TenantId, AzureAd:ClientId, AzureAd:ClientSecret");
+
+    var credential = new Azure.Identity.ClientSecretCredential(tenantId, clientId, clientSecret,
+        new Azure.Identity.ClientSecretCredentialOptions { AuthorityHost = Azure.Identity.AzureAuthorityHosts.AzurePublicCloud });
+
     return new GraphServiceClient(credential);
+});
+
+// IConfidentialClientApplication (MSAL) como Singleton para reutilizar token cache
+builder.Services.AddSingleton<Microsoft.Identity.Client.IConfidentialClientApplication>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var tenantId = config["AzureAd:TenantId"]
+        ?? throw new InvalidOperationException("AzureAd:TenantId no configurado.");
+    var clientId = config["AzureAd:ClientId"]
+        ?? throw new InvalidOperationException("AzureAd:ClientId no configurado.");
+    var secret = config["AzureAd:ClientSecret"]
+        ?? throw new InvalidOperationException("AzureAd:ClientSecret no configurado.");
+    var redirect = config["AzureAd:RedirectUri"]
+        ?? throw new InvalidOperationException("AzureAd:RedirectUri no configurado.");
+
+    return Microsoft.Identity.Client.ConfidentialClientApplicationBuilder
+        .Create(clientId)
+        .WithAuthority($"https://login.microsoftonline.com/{tenantId}/v2.0")
+        .WithClientSecret(secret)
+        .WithRedirectUri(redirect)
+        .Build();
 });
 
 // SignalR
@@ -241,6 +268,19 @@ builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepositor
 builder.Services.AddScoped(typeof(ICrudService<,,>), typeof(CrudService<,,>));
 
 builder.Services.AddSingleton<WsSeguUta.AuthSystem.API.Security.JwtTokenService>();
+
+// =========================================================
+// Multi-provider Identity
+// =========================================================
+builder.Services.Configure<LocalAdOptions>(builder.Configuration.GetSection(LocalAdOptions.Section));
+
+builder.Services.AddScoped<IIdentityProvider, EntraIdIdentityProvider>();
+builder.Services.AddScoped<IIdentityProvider, LocalAdIdentityProvider>();
+
+builder.Services.AddScoped<IDirectoryService, EntraIdDirectoryService>();
+builder.Services.AddScoped<IDirectoryService, LocalAdDirectoryService>();
+
+builder.Services.AddScoped<IIdentityProviderResolver, IdentityProviderResolver>();
 
 builder.Services.AddHealthChecks().AddDbContextCheck<AuthDbContext>();
 

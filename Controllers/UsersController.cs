@@ -33,8 +33,8 @@ public class UsersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int size = 100)
-        => Ok(ApiResponse.Ok(await _svc.ListAsync(page, size)));
+    public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+        => Ok(ApiResponse.Ok(await _svc.ListAsync(page, pageSize, ct)));
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id)
@@ -86,63 +86,30 @@ public class UsersController : ControllerBase
 
     // ✅ Endpoint que tu frontend está llamando: /api/users/paged
     [HttpGet("paged")]
-    public async Task<IActionResult> GetPaged([FromQuery] PagedRequestDto req)
+    public async Task<IActionResult> GetPaged([FromQuery] PagedRequestDto req, CancellationToken ct)
     {
-        // Normalizar
-        var page = req.Page < 1 ? 1 : req.Page;
-        var pageSize = req.PageSize < 1 ? DefaultPageSize : req.PageSize;
-        if (pageSize > MaxPageSize) pageSize = MaxPageSize;
+        req.Normalize(MaxPageSize);
 
-        var sortBy = (req.SortBy ?? "email").Trim().ToLowerInvariant();
-        var sortDir = (req.SortDirection ?? "asc").Trim().ToLowerInvariant();
-        var desc = sortDir == "desc";
-
-        var search = req.Search?.Trim();
+        var sortBy = (req.SortBy ?? "email").ToLowerInvariant();
+        var desc = req.SortDirection == "desc";
+        var search = req.Search;
 
         IQueryable<User> q = _context.Users.AsNoTracking();
 
-        // Filtro de búsqueda
         if (!string.IsNullOrWhiteSpace(search))
-        {
-            // Opción simple (depende de collation DB)
             q = q.Where(u =>
                 (u.Email != null && u.Email.Contains(search)) ||
-                (u.DisplayName != null && u.DisplayName.Contains(search))
-            );
+                (u.DisplayName != null && u.DisplayName.Contains(search)));
 
-            // Si quieres LIKE:
-            // var pattern = $"%{search}%";
-            // q = q.Where(u =>
-            //     (u.Email != null && EF.Functions.Like(u.Email, pattern)) ||
-            //     (u.DisplayName != null && EF.Functions.Like(u.DisplayName, pattern))
-            // );
-        }
-
-        // Sorting lista blanca
         q = ApplyUserSorting(q, sortBy, desc);
 
-        var totalCount = await q.CountAsync();
-        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageSize);
-
-        if (totalPages > 0 && page > totalPages) page = totalPages;
-
+        var totalCount = await q.LongCountAsync(ct);
         var items = await q
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
+            .Skip((req.Page - 1) * req.PageSize)
+            .Take(req.PageSize)
+            .ToListAsync(ct);
 
-        var result = new PagedResult<User>
-        {
-            Items = items,
-            Page = page,
-            PageSize = pageSize,
-            TotalCount = totalCount, 
-            TotalPages = totalPages,
-            HasPreviousPage = page > 1,
-            HasNextPage = totalPages > 0 && page < totalPages
-        };
-
-        return Ok(ApiResponse.Ok(result));
+        return Ok(ApiResponse.Ok(PagedResult<User>.Create(items, req.Page, req.PageSize, totalCount)));
     }
 
     private static IQueryable<User> ApplyUserSorting(IQueryable<User> q, string sortBy, bool desc)

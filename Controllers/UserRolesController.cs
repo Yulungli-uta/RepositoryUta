@@ -14,8 +14,20 @@ public class UserRolesController : ControllerBase
     public UserRolesController(ICrudService<UserRole, CreateUserRoleDto, UpdateUserRoleDto> svc) => _svc = svc;
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int size = 100)
-        => Ok(ApiResponse.Ok(await _svc.ListAsync(page, size)));
+    public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+    { 
+        var pagedEntities = await _svc.ListAsync(page, pageSize, ct);
+        return Ok(new
+        {
+            items = pagedEntities.Items,
+            page = pagedEntities.Page,
+            pageSize = pagedEntities.PageSize,
+            totalCount = pagedEntities.TotalCount,
+            totalPages = pagedEntities.TotalPages,
+            hasPreviousPage = pagedEntities.HasPreviousPage,
+            hasNextPage = pagedEntities.HasNextPage
+        });
+    }
     [HttpGet("{userId:guid}/{roleId:int}/{assignedAt}")]
     public async Task<IActionResult> Get(Guid userId, int roleId, DateTime assignedAt)
         => (await _svc.GetAsync(userId, roleId, assignedAt)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));

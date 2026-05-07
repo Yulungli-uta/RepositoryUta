@@ -26,34 +26,8 @@ public class RolesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> List(
-        [FromQuery] int page = 1,
-        [FromQuery] int size = 100)
-    {
-        return Ok(ApiResponse.Ok(await _svc.ListAsync(page, size)));
-    }
-
-    [HttpGet("paged")]
-    public async Task<IActionResult> ListPaged(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
-        [FromQuery] string? search = null,
-        [FromQuery] string? sortBy = null,
-        [FromQuery] string? sortDirection = "asc")
-    {
-        var result = await _svc.ListAsync(page, pageSize);
-
-        return Ok(ApiResponse.Ok(new
-        {
-            items = result,
-            page,
-            pageSize,
-            totalCount = result.Count(),
-            totalPages = 1,
-            hasPreviousPage = page > 1,
-            hasNextPage = false
-        }));
-    }
+    public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)
+        => Ok(ApiResponse.Ok(await _svc.ListAsync(page, pageSize, ct)));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> Get(int id)
