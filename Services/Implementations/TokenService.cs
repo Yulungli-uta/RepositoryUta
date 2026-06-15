@@ -14,6 +14,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         public string Create(Guid userId, string email, IEnumerable<string> roles) =>
             _jwt.Create(userId, email, roles);
 
+        public string Create(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups) =>
+            _jwt.Create(userId, email, roles, adGroups);
+
         public string Hash(string input) =>
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)));
     }

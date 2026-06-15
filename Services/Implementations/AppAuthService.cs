@@ -46,15 +46,17 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 var expiresAt = DateTime.Now.AddMinutes(60);
                 var token = _tokenService.Create(tokenId, app.ClientId, new[] { "Application" });
 
+                app.LastUsedAt = DateTime.UtcNow;
+
                 _context.LegacyAuthLogs.Add(new LegacyAuthLog
                 {
                     ApplicationId = app.Id,
-                    UserEmail = app.ClientId,
-                    AuthResult = "Success",
-                    AuthType = "ClientCredentials",
-                    IpAddress = ipAddress ?? "",
-                    UserAgent = userAgent ?? "",
-                    CreatedAt = DateTime.Now
+                    UserEmail     = app.ClientId,
+                    AuthResult    = "Success",
+                    AuthType      = "ClientCredentials",
+                    IpAddress     = ipAddress ?? "",
+                    UserAgent     = userAgent ?? "",
+                    CreatedAt     = DateTime.UtcNow,
                 });
                 await _context.SaveChangesAsync();
 

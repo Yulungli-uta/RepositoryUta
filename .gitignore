@@ -14,6 +14,7 @@ desktop.ini
 
 # === ARCHIVOS DE COMPILACIÓN ===
 bin/
+obj_codex/
 obj/
 *.dll
 *.exe

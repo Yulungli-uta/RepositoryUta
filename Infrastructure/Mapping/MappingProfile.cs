@@ -9,7 +9,9 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Mapping
     public MappingProfile()
     {
       CreateMap<CreateUserDto, User>();
-      CreateMap<UpdateUserDto, User>();
+      // Ignorar campos null al actualizar User para evitar pisar valores existentes (e.g. UserType NOT NULL)
+      CreateMap<UpdateUserDto, User>()
+        .ForAllMembers(opt => opt.Condition((src, dest, value) => value != null));
 
       CreateMap<CreateUserEmployeeDto, UserEmployee>();
       CreateMap<UpdateUserEmployeeDto, UserEmployee>();

@@ -1242,6 +1242,45 @@ public class AzureManagementService : IAzureManagementService
         );
     }
 
+    // ========== VERIFICACIÓN SYNC AD LOCAL → ENTRA ==========
+
+    public async Task<EntraSyncResult> CheckUserEntraSyncAsync(string upn)
+    {
+        try
+        {
+            var safe = upn.Replace("'", "''").Trim();
+            var resp = await _graphClient.Users.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = $"userPrincipalName eq '{safe}'";
+                config.QueryParameters.Select = new[] { "id", "userPrincipalName", "accountEnabled" };
+            });
+
+            var user = resp?.Value?.FirstOrDefault();
+            if (user is null)
+                return new EntraSyncResult(
+                    EntraSyncStatus.PendingSync, null, null,
+                    "Usuario no encontrado en Microsoft Entra. Pendiente de sincronización con Entra Connect.");
+
+            var status = user.AccountEnabled == true ? EntraSyncStatus.Synced : EntraSyncStatus.Disabled;
+            var msg = user.AccountEnabled == true
+                ? "Sincronizado y habilitado en Microsoft Entra."
+                : "Sincronizado en Microsoft Entra, pero la cuenta está deshabilitada.";
+            return new EntraSyncResult(status, user.AccountEnabled, user.Id, msg);
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "Error Graph al verificar sync Entra para UPN={Upn}", upn);
+            return new EntraSyncResult(
+                EntraSyncStatus.SyncError, null, null,
+                $"Error al consultar Microsoft Entra: {ex.Error?.Message ?? ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error inesperado al verificar sync Entra para UPN={Upn}", upn);
+            return new EntraSyncResult(EntraSyncStatus.SyncError, null, null, "Error inesperado al verificar sincronización.");
+        }
+    }
+
     private static bool IsValidEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email))

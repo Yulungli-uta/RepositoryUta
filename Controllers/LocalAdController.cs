@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using WsSeguUta.AuthSystem.API.Infrastructure.Identity.Contracts;
+using WsSeguUta.AuthSystem.API.Infrastructure.Identity.LocalAd;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
+using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
@@ -10,12 +13,28 @@ namespace WsSeguUta.AuthSystem.API.Controllers;
 public class LocalAdController : ControllerBase
 {
     private readonly IIdentityProviderResolver _resolver;
+    private readonly IAzureManagementService _azureMgmt;
+    private readonly IOptions<LocalAdOptions> _adOpts;
     private readonly ILogger<LocalAdController> _logger;
 
-    public LocalAdController(IIdentityProviderResolver resolver, ILogger<LocalAdController> logger)
+    public LocalAdController(
+        IIdentityProviderResolver resolver,
+        IAzureManagementService azureMgmt,
+        IOptions<LocalAdOptions> adOpts,
+        ILogger<LocalAdController> logger)
     {
         _resolver = resolver;
+        _azureMgmt = azureMgmt;
+        _adOpts = adOpts;
         _logger = logger;
+    }
+
+    private string GetExpectedDomain()
+    {
+        return string.Join(".", _adOpts.Value.BaseDn
+            .Split(',')
+            .Where(p => p.TrimStart().StartsWith("DC=", StringComparison.OrdinalIgnoreCase))
+            .Select(p => p.TrimStart()[3..]));
     }
 
     // ── Autenticación ─────────────────────────────────────────────────────────
@@ -88,14 +107,31 @@ public class LocalAdController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.DisplayName) || string.IsNullOrWhiteSpace(req.InitialPassword))
             return BadRequest(ApiResponse.Fail("Email, DisplayName e InitialPassword son requeridos"));
 
+        if (string.IsNullOrWhiteSpace(req.GivenName))
+            return BadRequest(ApiResponse.Fail("El nombre (GivenName) es requerido para crear el usuario en AD"));
+
+        if (string.IsNullOrWhiteSpace(req.Surname))
+            return BadRequest(ApiResponse.Fail("El apellido (Surname) es requerido para crear el usuario en AD"));
+
+        var expectedDomain = GetExpectedDomain();
+        if (!string.IsNullOrWhiteSpace(expectedDomain) &&
+            !req.Email.EndsWith($"@{expectedDomain}", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(ApiResponse.Fail($"El correo debe usar el dominio institucional: @{expectedDomain}"));
+
         var dir = _resolver.GetDirectory("LocalAd");
         var newUser = new DirectoryUser(
             string.Empty, req.Email, req.DisplayName,
             req.GivenName, req.Surname, req.JobTitle, req.Department, req.AccountEnabled, null);
 
-        var created = await dir.CreateUserAsync(newUser, req.InitialPassword, req.ForcePasswordChange);
+        var targetOu = !string.IsNullOrWhiteSpace(req.TargetOu)
+            ? req.TargetOu
+            : _adOpts.Value.FuncionariosActivosOu;
+        var created = await dir.CreateUserAsync(newUser, req.InitialPassword, targetOu, req.ForcePasswordChange);
         _logger.LogInformation("Usuario AD local creado: {Email}", req.Email);
-        return CreatedAtAction(nameof(GetUser), new { id = created.Id }, ApiResponse.Ok(MapUser(created), "Usuario creado en AD"));
+
+        var sync = await _azureMgmt.CheckUserEntraSyncAsync(created.Email);
+        return CreatedAtAction(nameof(GetUser), new { id = created.Id },
+            ApiResponse.Ok(MapUserWithSync(created, sync), "Usuario creado en AD. Estado de sincronización con Microsoft Entra adjunto."));
     }
 
     /// <summary>Actualiza atributos de un usuario existente en AD local.</summary>
@@ -120,27 +156,39 @@ public class LocalAdController : ControllerBase
         return Ok(ApiResponse.Ok(MapUser(result), "Usuario actualizado"));
     }
 
-    /// <summary>Habilita la cuenta de un usuario en AD local.</summary>
+    /// <summary>Habilita la cuenta de un usuario en AD local y verifica el estado en Microsoft Entra.</summary>
     [HttpPost("users/{id}/enable")]
     public async Task<IActionResult> EnableUser(string id)
     {
         var dir = _resolver.GetDirectory("LocalAd");
+        var existing = await dir.GetUserAsync(id);
+        if (existing is null)
+            return NotFound(ApiResponse.Fail($"Usuario '{id}' no encontrado en AD"));
+
         await dir.SetUserEnabledAsync(id, true);
         _logger.LogInformation("Usuario AD local habilitado: {Id}", id);
-        return Ok(ApiResponse.Ok(null, "Usuario habilitado"));
+
+        var sync = await _azureMgmt.CheckUserEntraSyncAsync(existing.Email);
+        return Ok(ApiResponse.Ok(new { sync }, "Usuario habilitado en AD. Verifique el estado de sincronización con Microsoft Entra."));
     }
 
-    /// <summary>Deshabilita la cuenta de un usuario en AD local.</summary>
+    /// <summary>Deshabilita la cuenta de un usuario en AD local y verifica el estado en Microsoft Entra.</summary>
     [HttpPost("users/{id}/disable")]
     public async Task<IActionResult> DisableUser(string id)
     {
         var dir = _resolver.GetDirectory("LocalAd");
+        var existing = await dir.GetUserAsync(id);
+        if (existing is null)
+            return NotFound(ApiResponse.Fail($"Usuario '{id}' no encontrado en AD"));
+
         await dir.SetUserEnabledAsync(id, false);
         _logger.LogInformation("Usuario AD local deshabilitado: {Id}", id);
-        return Ok(ApiResponse.Ok(null, "Usuario deshabilitado"));
+
+        var sync = await _azureMgmt.CheckUserEntraSyncAsync(existing.Email);
+        return Ok(ApiResponse.Ok(new { sync }, "Usuario deshabilitado en AD. Para completar el bloqueo en Office 365 se requiere sincronización con Entra Connect."));
     }
 
-    /// <summary>Elimina un usuario del directorio AD local.</summary>
+    /// <summary>Elimina un usuario del directorio AD local y verifica el estado en Microsoft Entra.</summary>
     [HttpDelete("users/{id}")]
     public async Task<IActionResult> DeleteUser(string id)
     {
@@ -149,9 +197,25 @@ public class LocalAdController : ControllerBase
         if (existing is null)
             return NotFound(ApiResponse.Fail($"Usuario '{id}' no encontrado en AD"));
 
+        var upn = existing.Email;
         await dir.DeleteUserAsync(id);
         _logger.LogInformation("Usuario AD local eliminado: {Id}", id);
-        return Ok(ApiResponse.Ok(null, "Usuario eliminado del directorio"));
+
+        var sync = await _azureMgmt.CheckUserEntraSyncAsync(upn);
+        return Ok(ApiResponse.Ok(new { sync }, "Usuario eliminado de AD. La eliminación en Microsoft Entra se completará tras la sincronización con Entra Connect."));
+    }
+
+    /// <summary>Verifica si un usuario de AD local ya está sincronizado en Microsoft Entra (por objectGUID).</summary>
+    [HttpGet("users/{id}/entra-sync")]
+    public async Task<IActionResult> CheckEntraSync(string id)
+    {
+        var dir = _resolver.GetDirectory("LocalAd");
+        var user = await dir.GetUserAsync(id);
+        if (user is null)
+            return NotFound(ApiResponse.Fail($"Usuario '{id}' no encontrado en AD"));
+
+        var sync = await _azureMgmt.CheckUserEntraSyncAsync(user.Email);
+        return Ok(ApiResponse.Ok(sync, sync.Message));
     }
 
     // ── Grupos ────────────────────────────────────────────────────────────────
@@ -179,6 +243,36 @@ public class LocalAdController : ControllerBase
         return group is null
             ? NotFound(ApiResponse.Fail($"Grupo '{id}' no encontrado en AD"))
             : Ok(ApiResponse.Ok(MapGroup(group)));
+    }
+
+    /// <summary>Crea un nuevo grupo de seguridad en AD local.</summary>
+    [HttpPost("groups")]
+    public async Task<IActionResult> CreateGroup([FromBody] CreateLocalAdGroupRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.GroupName))
+            return BadRequest(ApiResponse.Fail("El nombre del grupo es requerido"));
+
+        var dir = _resolver.GetDirectory("LocalAd");
+        var created = await dir.CreateGroupAsync(req.GroupName, req.Description);
+        _logger.LogInformation("Grupo AD local creado: {Name}", req.GroupName);
+        return CreatedAtAction(nameof(GetGroup), new { id = created.Id }, ApiResponse.Ok(MapGroup(created), "Grupo creado en AD"));
+    }
+
+    /// <summary>Restablece la contraseña de un usuario en AD local (operación de administrador).</summary>
+    [HttpPost("users/{id}/change-password")]
+    public async Task<IActionResult> ChangeUserPassword(string id, [FromBody] ChangeLocalAdUserPasswordRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.NewPassword))
+            return BadRequest(ApiResponse.Fail("La nueva contraseña es requerida"));
+
+        var dir = _resolver.GetDirectory("LocalAd");
+        var existing = await dir.GetUserAsync(id);
+        if (existing is null)
+            return NotFound(ApiResponse.Fail($"Usuario '{id}' no encontrado en AD"));
+
+        await dir.ChangeUserPasswordAsync(id, req.NewPassword, req.ForcePasswordChange);
+        _logger.LogInformation("Contraseña restablecida en AD local para usuario: {Id}", id);
+        return Ok(ApiResponse.Ok(null, "Contraseña restablecida exitosamente"));
     }
 
     /// <summary>Agrega un usuario a un grupo de AD local.</summary>
@@ -236,6 +330,9 @@ public class LocalAdController : ControllerBase
 
     private static LocalAdUserResponse MapUser(DirectoryUser u) =>
         new(u.Id, u.Email, u.DisplayName, u.GivenName, u.Surname, u.JobTitle, u.Department, u.AccountEnabled);
+
+    private static LocalAdUserWithSyncResponse MapUserWithSync(DirectoryUser u, EntraSyncResult sync) =>
+        new(u.Id, u.Email, u.DisplayName, u.GivenName, u.Surname, u.JobTitle, u.Department, u.AccountEnabled, sync);
 
     private static LocalAdGroupResponse MapGroup(DirectoryGroup g) =>
         new(g.Id, g.Name, g.Description, g.Email);

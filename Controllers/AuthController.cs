@@ -5,6 +5,8 @@ using System.Security.Claims;
 using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
+using WsSeguUta.AuthSystem.API.Data.Repositories;
+using WsSeguUta.AuthSystem.API.Infrastructure.Identity.Contracts;
 using System.Net;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
@@ -15,43 +17,28 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthService _auth;
     private readonly IAzureAuthService _azure;
+    private readonly IAzureManagementService _azureMgmt;
+    private readonly IUserRepository _users;
     private readonly INotificationService _notificationService;
+    private readonly IIdentityProviderResolver _identityResolver;
+    private readonly IConfiguration _cfg;
 
-    private string? GetClientIp()
-    {
-        // Si estás detrás de proxy / gateway, esto suele venir poblado     
-        var xff = Request.Headers["X-Forwarded-For"].ToString();
-        if (!string.IsNullOrWhiteSpace(xff))
-            return xff.Split(',')[0].Trim();
-
-        var xRealIp = Request.Headers["X-Real-IP"].ToString();
-        if (!string.IsNullOrWhiteSpace(xRealIp))
-            return xRealIp.Trim();
-
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-        // Normaliza loopback IPv6 a 127.0.0.1 (útil en dev)
-        if (ip == "::1") return "127.0.0.1";
-
-        return ip;
-    }
-
-    private string? GetUserAgent()
-        => Request.Headers["User-Agent"].ToString();
-
-    private string? GetDeviceInfo()
-    {
-        // opcional: tu front/cliente puede enviar algo como:
-        // "Chrome 120 | Windows 11 | Laptop"
-        var device = Request.Headers["X-Device-Info"].ToString();
-        return string.IsNullOrWhiteSpace(device) ? null : device;
-    }
-
-    public AuthController(IAuthService auth, IAzureAuthService azure, INotificationService notificationService)
+    public AuthController(
+        IAuthService auth,
+        IAzureAuthService azure,
+        IAzureManagementService azureMgmt,
+        IUserRepository users,
+        INotificationService notificationService,
+        IIdentityProviderResolver identityResolver,
+        IConfiguration cfg)
     {
         _auth = auth;
         _azure = azure;
+        _azureMgmt = azureMgmt;
+        _users = users;
         _notificationService = notificationService;
+        _identityResolver = identityResolver;
+        _cfg = cfg;
     }
 
     [HttpPost("login")]
@@ -78,20 +65,52 @@ public class AuthController : ControllerBase
 
     [HttpGet("azure/url")]
     [AllowAnonymous]
-    public async Task<IActionResult> AzureUrl([FromQuery] string? clientId = null, string? browserId = null)
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> AzureUrlGet(
+        [FromQuery] string? clientId = null,
+        [FromQuery] string? browserId = null)
     {
-        Console.WriteLine($"***************Azure URL requested with clientId: {clientId}");
-        //clientId = "legacy-erp-client"; 10000000-0000-0000-0000-000000000001
-        var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId);
-        //Console.WriteLine($"***************Azure auth URL generated: {url} with state {state}");
-        return Ok(ApiResponse.Ok(new
+        Console.WriteLine($"***************Azure URL requested (GET) with clientId: {clientId}");
+        try
         {
-            url,
-            state,
-            clientId,
-            browserId,
-            message = clientId != null ? $"Login will notify {clientId}" : "Login will notify all applications"
-        }));
+            var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId);
+            return Ok(ApiResponse.Ok(new
+            {
+                url,
+                state,
+                clientId,
+                browserId,
+                message = $"Login habilitado para la aplicación {clientId}"
+            }));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(ApiResponse.Fail(ex.Message));
+        }
+    }
+
+    [HttpPost("azure/url")]
+    [AllowAnonymous]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> AzureUrlPost([FromBody] AzureAuthUrlRequest req)
+    {
+        Console.WriteLine($"***************Azure URL requested (POST) with clientId: {req.ClientId}");
+        try
+        {
+            var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId);
+            return Ok(ApiResponse.Ok(new
+            {
+                url,
+                state,
+                clientId = req.ClientId,
+                browserId = req.BrowserId,
+                message = $"Login habilitado para la aplicación {req.ClientId}"
+            }));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(ApiResponse.Fail(ex.Message));
+        }
     }
 
     [HttpGet("azure/callback")]
@@ -123,8 +142,19 @@ public class AuthController : ControllerBase
         {
             //Console.WriteLine($"****************Error decoding state: {ex.Message}. Proceeding without clientId.");
         }
-        var pair = await _azure.HandleCallbackAsync(code, state);
-        Console.WriteLine($"******************Azure login processed. pair: {pair}, TokenPair: {(pair != null ? "Success" : "Failed")}");
+        TokenPair? pair;
+        try
+        {
+            pair = await _azure.HandleCallbackAsync(code, state);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.WriteLine($"***************Azure callback: acceso no autorizado — {ex.Message}");
+            return Content(
+                $"<html><body><h3>Acceso no autorizado</h3><p>{ex.Message}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
+                "text/html");
+        }
+        //Console.WriteLine($"******************Azure login processed. pair: {pair}, TokenPair: {(pair != null ? "Success" : "Failed")}");
         if (pair != null)
         {
             // ========== DEBUG Y ENVIAR NOTIFICACIONES DE LOGIN OFFICE365 ==========
@@ -152,9 +182,9 @@ public class AuthController : ControllerBase
                 if (paddingNeeded > 0)
                 {
                     payloadBase64 += new string('=', paddingNeeded);
-                    Console.WriteLine($"***************Added {paddingNeeded} padding characters to payload");
+                    //Console.WriteLine($"***************Added {paddingNeeded} padding characters to payload");
                 }
-                Console.WriteLine($"***************Attempting to decode payload...");
+                //Console.WriteLine($"***************Attempting to decode payload...");
                 // Decodificar el payload del JWT
                 byte[] payloadBytes;
                 try
@@ -169,16 +199,16 @@ public class AuthController : ControllerBase
                     return Content("<html><body>Error en decodificación. Cierre esta ventana.</body></html>", "text/html");
                 }
                 var payloadJson = System.Text.Encoding.UTF8.GetString(payloadBytes);
-                Console.WriteLine($"***************Payload JSON: {payloadJson}");
+                //Console.WriteLine($"***************Payload JSON: {payloadJson}");
                 // Deserializar el payload
                 Dictionary<string, object>? tokenPayload = null;
                 try
                 {
                     tokenPayload = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(payloadJson);
-                    Console.WriteLine($"***************Payload deserialized successfully. Keys count: {tokenPayload?.Count ?? 0}");
+                    //Console.WriteLine($"***************Payload deserialized successfully. Keys count: {tokenPayload?.Count ?? 0}");
                     if (tokenPayload != null)
                     {
-                        Console.WriteLine("***************Available keys in token payload:");
+                        //Console.WriteLine("***************Available keys in token payload:");
                         foreach (var kvp in tokenPayload)
                         {
                             var valuePreview = kvp.Value?.ToString();
@@ -303,18 +333,20 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> ValidateToken([FromBody] ValidateTokenRequest req)
     {
-        Console.WriteLine($"Token validation request for token: {req.Token?[..Math.Min(10, req.Token?.Length ?? 0)]}...");
+        //Console.WriteLine($"Token validation request for token: {req.Token?[..Math.Min(10, req.Token?.Length ?? 0)]}...");
+        //Console.WriteLine($"Token validation request for token Real: {req.Token}");
+        //_logger.LogInformation($"Token completo: {req.Token}");
         if (string.IsNullOrEmpty(req.Token))
         {
             return BadRequest(ApiResponse.Fail("Token is required"));
         }
         //Console.WriteLine($"********** Auth- ValidateToken token{req.Token[..Math.Min(20, req.Token.Length)]}, clienid: {req.ClientId}");
         var result = await _auth.ValidateTokenAsync(req.Token, req.ClientId);
-        Console.WriteLine("******** ValidateTokenAsync Response ********");
-        Console.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        }));
+        //Console.WriteLine("******** ValidateTokenAsync Response ********");
+        //Console.WriteLine(JsonSerializer.Serialize(result, new JsonSerializerOptions
+        //{
+        //    WriteIndented = true
+        //}));
         return Ok(ApiResponse.Ok(result, result.IsValid ? "Token válido" : "Token inválido"));
     }
 
@@ -330,15 +362,45 @@ public class AuthController : ControllerBase
         if (!Guid.TryParse(sub, out var userId))
             return Unauthorized(ApiResponse.Fail("Token inválido"));
 
-        if (string.IsNullOrWhiteSpace(req.CurrentPassword) || string.IsNullOrWhiteSpace(req.NewPassword))
-            return BadRequest(ApiResponse.Fail("Las contraseñas son requeridas"));
+        if (string.IsNullOrWhiteSpace(req.NewPassword))
+            return BadRequest(ApiResponse.Fail("La nueva contraseña es requerida"));
 
-        var success = await _auth.ChangePasswordAsync(userId, req.CurrentPassword, req.NewPassword);
+        var user = await _users.FindByIdAsync(userId);
+        if (user is null || !user.IsActive)
+            return BadRequest(ApiResponse.Fail("Usuario no encontrado o inactivo"));
 
-        if (!success)
-            return BadRequest(ApiResponse.Fail("No se pudo cambiar la contraseña. Verifique que la contraseña actual sea correcta, que sea usuario local, y que la nueva cumpla los requisitos (mín. 8 caracteres, una mayúscula, un número)."));
+        if (string.Equals(user.UserType, "AzureAD", StringComparison.OrdinalIgnoreCase))
+        {
+            var method = _cfg["PasswordChange:Method"] ?? "AzureWriteback";
 
-        return Ok(ApiResponse.Ok(new ChangePasswordResponse(true, "Contraseña cambiada exitosamente")));
+            if (string.Equals(method, "LocalAd", StringComparison.OrdinalIgnoreCase))
+            {
+                var (ok, msg) = await ChangePasswordViaLocalAdAsync(user, req.CurrentPassword, req.NewPassword);
+                return ok ? Ok(ApiResponse.Ok(new ChangePasswordResponse(true, msg))) : BadRequest(ApiResponse.Fail(msg));
+            }
+
+            // AzureWriteback: requiere ObjectId configurado
+            if (user.AzureObjectId is null)
+                return BadRequest(ApiResponse.Fail("El usuario no tiene un ObjectId de Azure asociado. Configure PasswordChange:Method=LocalAd como alternativa."));
+
+            var azureOk = await _azureMgmt.ChangePasswordInAzureAsync(
+                user.AzureObjectId.Value.ToString(), req.NewPassword, forceChangeNextSignIn: false);
+
+            return azureOk
+                ? Ok(ApiResponse.Ok(new ChangePasswordResponse(true, "Contraseña cambiada exitosamente en Office 365")))
+                : BadRequest(ApiResponse.Fail("No se pudo cambiar la contraseña en Office 365. Verifique que cumpla los requisitos de la política."));
+        }
+
+        // Usuario local: requiere contraseña actual para verificación
+        if (string.IsNullOrWhiteSpace(req.CurrentPassword))
+            return BadRequest(ApiResponse.Fail("La contraseña actual es requerida para usuarios locales"));
+
+        var result = await _auth.ChangePasswordAsync(userId, req.CurrentPassword, req.NewPassword);
+
+        if (!result.Success)
+            return BadRequest(ApiResponse.Fail(result.Message));
+
+        return Ok(ApiResponse.Ok(result));
     }
 
     /// <summary>
@@ -365,7 +427,9 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Paso 2 del cambio de contraseña con doble factor: verifica OTP + contraseña actual y aplica el cambio.
+    /// Paso 2 del cambio de contraseña con doble factor.
+    /// Usuarios locales: requiere OTP + contraseña actual + nueva contraseña.
+    /// Usuarios AzureAD: requiere OTP + nueva contraseña (sin contraseña actual; se aplica directo en Azure AD).
     /// </summary>
     [HttpPost("change-password-2fa")]
     [Authorize]
@@ -375,16 +439,129 @@ public class AuthController : ControllerBase
         if (!Guid.TryParse(sub, out var userId))
             return Unauthorized(ApiResponse.Fail("Token inválido"));
 
-        if (string.IsNullOrWhiteSpace(req.CurrentPassword) ||
-            string.IsNullOrWhiteSpace(req.NewPassword) ||
-            string.IsNullOrWhiteSpace(req.OtpCode))
-            return BadRequest(ApiResponse.Fail("Todos los campos son requeridos"));
+        if (string.IsNullOrWhiteSpace(req.NewPassword) || string.IsNullOrWhiteSpace(req.OtpCode))
+            return BadRequest(ApiResponse.Fail("La nueva contraseña y el código OTP son requeridos"));
+
+        var user = await _users.FindByIdAsync(userId);
+        if (user is null || !user.IsActive)
+            return BadRequest(ApiResponse.Fail("Usuario no encontrado o inactivo"));
+
+        // ── Flujo AzureAD: verificar OTP, luego cambiar según método configurado ──
+        if (string.Equals(user.UserType, "AzureAD", StringComparison.OrdinalIgnoreCase))
+        {
+            // OTP siempre se verifica primero independientemente del método
+            var otpResult = await _auth.VerifyAndConsumePasswordOtpAsync(userId, req.OtpCode);
+            if (!otpResult.Success)
+                return BadRequest(ApiResponse.Fail(otpResult.Message));
+
+            var method = _cfg["PasswordChange:Method"] ?? "AzureWriteback";
+
+            if (string.Equals(method, "LocalAd", StringComparison.OrdinalIgnoreCase))
+            {
+                var (ok, msg) = await ChangePasswordViaLocalAdAsync(user, req.CurrentPassword, req.NewPassword);
+                return ok ? Ok(ApiResponse.Ok(new ChangePasswordResponse(true, msg))) : BadRequest(ApiResponse.Fail(msg));
+            }
+
+            // AzureWriteback
+            if (user.AzureObjectId is null)
+                return BadRequest(ApiResponse.Fail("El usuario no tiene un ObjectId de Azure asociado. Configure PasswordChange:Method=LocalAd como alternativa."));
+
+            var azureOk = await _azureMgmt.ChangePasswordInAzureAsync(
+                user.AzureObjectId.Value.ToString(), req.NewPassword, forceChangeNextSignIn: false);
+
+            return azureOk
+                ? Ok(ApiResponse.Ok(new ChangePasswordResponse(true, "Contraseña cambiada exitosamente en Office 365 con verificación 2FA")))
+                : BadRequest(ApiResponse.Fail("No se pudo cambiar la contraseña en Office 365. Verifique que cumpla los requisitos de la política."));
+        }
+
+        // ── Flujo Local: OTP + contraseña actual requerida ───────────────────
+        if (string.IsNullOrWhiteSpace(req.CurrentPassword))
+            return BadRequest(ApiResponse.Fail("La contraseña actual es requerida para usuarios locales"));
 
         var result = await _auth.ChangePasswordWith2FAAsync(userId, req.CurrentPassword, req.NewPassword, req.OtpCode);
-
         if (!result.Success)
             return BadRequest(ApiResponse.Fail(result.Message));
 
         return Ok(ApiResponse.Ok(result, result.Message));
+    }
+
+    /// <summary>
+    /// Devuelve el método de cambio de contraseña configurado para AzureAD users.
+    /// "LocalAd" = cambia en AD local (sin Password Writeback).
+    /// "AzureWriteback" = cambia vía Graph API en Azure AD.
+    /// </summary>
+    [HttpGet("password-change-method")]
+    [AllowAnonymous]
+    public IActionResult GetPasswordChangeMethod()
+    {
+        var method = _cfg["PasswordChange:Method"] ?? "AzureWriteback";
+        return Ok(ApiResponse.Ok(new { method }));
+    }
+
+    /// <summary>
+    /// Verifica la contraseña actual del usuario contra el AD Local y cambia la contraseña
+    /// usando la cuenta de servicio + LDAPS. No requiere Password Writeback.
+    /// </summary>
+    private async Task<(bool Success, string Message)> ChangePasswordViaLocalAdAsync(
+        WsSeguUta.AuthSystem.API.Models.Entities.User user, string? currentPassword, string newPassword)
+    {
+        if (string.IsNullOrWhiteSpace(currentPassword))
+            return (false, "La contraseña actual es requerida para cambio vía AD Local");
+
+        try
+        {
+            // 1. Verificar contraseña actual via LDAP bind
+            var provider = _identityResolver.GetProvider("LocalAd");
+            var authResult = await provider.AuthenticateAsync(
+                new ProviderAuthRequest("LocalAd", user.Email, currentPassword));
+
+            if (!authResult.Success)
+                return (false, "La contraseña actual es incorrecta");
+
+            // 2. Buscar usuario en AD para obtener el objectGUID
+            var dir = _identityResolver.GetDirectory("LocalAd");
+            var adUser = await dir.GetUserByEmailAsync(user.Email);
+            if (adUser is null)
+                return (false, "Usuario no encontrado en Active Directory local. Contacte al administrador.");
+
+            // 3. Cambiar contraseña via cuenta de servicio + LDAPS
+            await dir.ChangeUserPasswordAsync(adUser.Id, newPassword, false);
+
+            return (true, "Contraseña cambiada exitosamente en Active Directory local");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Error al cambiar contraseña en AD Local: {ex.Message}");
+        }
+    }
+
+    private string? GetClientIp()
+    {
+        // Si estás detrás de proxy / gateway, esto suele venir poblado
+        var xff = Request.Headers["X-Forwarded-For"].ToString();
+        if (!string.IsNullOrWhiteSpace(xff))
+            return xff.Split(',')[0].Trim();
+
+        var xRealIp = Request.Headers["X-Real-IP"].ToString();
+        if (!string.IsNullOrWhiteSpace(xRealIp))
+            return xRealIp.Trim();
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        // Normaliza loopback IPv6 a 127.0.0.1 (útil en dev)
+        if (ip == "::1") return "127.0.0.1";
+
+        return ip;
+    }
+
+    private string? GetUserAgent()
+        => Request.Headers["User-Agent"].ToString();
+
+    private string? GetDeviceInfo()
+    {
+        // opcional: tu front/cliente puede enviar algo como:
+        // "Chrome 120 | Windows 11 | Laptop"
+        var device = Request.Headers["X-Device-Info"].ToString();
+        return string.IsNullOrWhiteSpace(device) ? null : device;
     }
 }

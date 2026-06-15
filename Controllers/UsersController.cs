@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Models.Entities;
@@ -19,17 +20,20 @@ public class UsersController : ControllerBase
     private readonly AuthDbContext _context;
     private readonly IUserPermissionService _permissionService;
     private readonly IUserRegistrationService _userRegistrationService;
+    private readonly IAuditService _audit;
 
     public UsersController(
         ICrudService<User, CreateUserDto, UpdateUserDto> svc,
         AuthDbContext context,
         IUserPermissionService permissionService,
-        IUserRegistrationService userRegistrationService)
+        IUserRegistrationService userRegistrationService,
+        IAuditService audit)
     {
         _svc = svc;
         _context = context;
         _permissionService = permissionService;
         _userRegistrationService = userRegistrationService;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -50,6 +54,12 @@ public class UsersController : ControllerBase
         try
         {
             var result = await _userRegistrationService.CreateUserWithEmployeeAsync(dto);
+
+            await _audit.LogAsync(
+                action:    "UserCreated",
+                module:    "Users",
+                newValues: JsonSerializer.Serialize(result));
+
             return Ok(ApiResponse.Ok(result));
         }
         catch (InvalidOperationException ex)
@@ -64,11 +74,57 @@ public class UsersController : ControllerBase
 
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserDto dto)
-        => (await _svc.UpdateAsync(id, dto)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
+    {
+        var before = await _svc.GetAsync(id);
+        if (before is null) return NotFound(ApiResponse.Fail("No existe"));
+
+        var updated = await _svc.UpdateAsync(id, dto);
+        if (updated is null) return NotFound(ApiResponse.Fail("No existe"));
+
+        await _audit.LogAsync(
+            action:    "UserUpdated",
+            module:    "Users",
+            entityId:  id.ToString(),
+            oldValues: JsonSerializer.Serialize(new { before.Email, before.DisplayName, before.IsActive, before.UserType }),
+            newValues: JsonSerializer.Serialize(new { updated.Email, updated.DisplayName, updated.IsActive, updated.UserType }));
+
+        return Ok(ApiResponse.Ok(updated));
+    }
 
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
-        => (await _svc.DeleteAsync(id)) ? Ok(ApiResponse.Ok(message: "Eliminado")) : NotFound(ApiResponse.Fail("No existe"));
+    {
+        var user = await _context.Users.FindAsync(id);
+        if (user == null) return NotFound(ApiResponse.Fail("No existe"));
+
+        // Snapshot para auditoría antes de eliminar
+        var snapshot = JsonSerializer.Serialize(new { user.Email, user.DisplayName, user.UserType, user.IsActive });
+
+        // Eliminar registros dependientes que tienen FK hacia tbl_Users
+        // NOTA: RoleChangeHistory NO se elimina para preservar el historial de auditoría de roles
+        _context.UserEmployees.RemoveRange(_context.UserEmployees.Where(x => x.UserId == id));
+        _context.UserRoles.RemoveRange(_context.UserRoles.Where(x => x.UserId == id));
+        _context.UserSessions.RemoveRange(_context.UserSessions.Where(x => x.UserId == id));
+        _context.SecurityTokens.RemoveRange(_context.SecurityTokens.Where(x => x.UserId == id));
+        _context.PasswordHistory.RemoveRange(_context.PasswordHistory.Where(x => x.UserId == id));
+        _context.UserAccountLocks.RemoveRange(_context.UserAccountLocks.Where(x => x.UserId == id));
+        _context.UserActivityLogs.RemoveRange(_context.UserActivityLogs.Where(x => x.UserId == id));
+        _context.UserProvisionings.RemoveRange(_context.UserProvisionings.Where(x => x.AuthUserId == id));
+
+        var localCred = await _context.LocalUserCredentials.FindAsync(id);
+        if (localCred != null) _context.LocalUserCredentials.Remove(localCred);
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+
+        await _audit.LogAsync(
+            action:    "UserDeleted",
+            module:    "Users",
+            entityId:  id.ToString(),
+            oldValues: snapshot);
+
+        return Ok(ApiResponse.Ok(message: "Eliminado"));
+    }
 
     [HttpGet("{userId:guid}/permissions")]
     public async Task<IActionResult> GetUserPermissions(Guid userId)
@@ -86,20 +142,34 @@ public class UsersController : ControllerBase
 
     // ✅ Endpoint que tu frontend está llamando: /api/users/paged
     [HttpGet("paged")]
-    public async Task<IActionResult> GetPaged([FromQuery] PagedRequestDto req, CancellationToken ct)
+    public async Task<IActionResult> GetPaged(
+        [FromQuery] PagedRequestDto req,
+        [FromQuery] bool? isActive,
+        [FromQuery] string? userType,
+        CancellationToken ct)
     {
         req.Normalize(MaxPageSize);
 
-        var sortBy = (req.SortBy ?? "email").ToLowerInvariant();
-        var desc = req.SortDirection == "desc";
+        // Orden predeterminado: último login descendente
+        var sortBy = (req.SortBy ?? "lastlogin").ToLowerInvariant();
+        var desc   = sortBy == "lastlogin" ? req.SortDirection != "asc" : req.SortDirection == "desc";
         var search = req.Search;
 
         IQueryable<User> q = _context.Users.AsNoTracking();
 
+        // Filtro por texto (email o nombre)
         if (!string.IsNullOrWhiteSpace(search))
             q = q.Where(u =>
-                (u.Email != null && u.Email.Contains(search)) ||
-                (u.DisplayName != null && u.DisplayName.Contains(search)));
+                (u.Email        != null && u.Email.Contains(search)) ||
+                (u.DisplayName  != null && u.DisplayName.Contains(search)));
+
+        // Filtro por estado
+        if (isActive.HasValue)
+            q = q.Where(u => u.IsActive == isActive.Value);
+
+        // Filtro por tipo de usuario
+        if (!string.IsNullOrWhiteSpace(userType))
+            q = q.Where(u => u.UserType == userType);
 
         q = ApplyUserSorting(q, sortBy, desc);
 
@@ -116,12 +186,12 @@ public class UsersController : ControllerBase
     {
         return sortBy switch
         {
-            "email" => desc ? q.OrderByDescending(u => u.Email) : q.OrderBy(u => u.Email),
-            "displayname" => desc ? q.OrderByDescending(u => u.DisplayName) : q.OrderBy(u => u.DisplayName),
-            "usertype" => desc ? q.OrderByDescending(u => u.UserType) : q.OrderBy(u => u.UserType),
-            "isactive" => desc ? q.OrderByDescending(u => u.IsActive) : q.OrderBy(u => u.IsActive),
-            "lastlogin" => desc ? q.OrderByDescending(u => u.LastLogin) : q.OrderBy(u => u.LastLogin),
-            _ => desc ? q.OrderByDescending(u => u.Email) : q.OrderBy(u => u.Email),
+            "email"       => desc ? q.OrderByDescending(u => u.Email)       : q.OrderBy(u => u.Email),
+            "displayname" => desc ? q.OrderByDescending(u => u.DisplayName)  : q.OrderBy(u => u.DisplayName),
+            "usertype"    => desc ? q.OrderByDescending(u => u.UserType)     : q.OrderBy(u => u.UserType),
+            "isactive"    => desc ? q.OrderByDescending(u => u.IsActive)     : q.OrderBy(u => u.IsActive),
+            "lastlogin"   => desc ? q.OrderByDescending(u => u.LastLogin)    : q.OrderBy(u => u.LastLogin),
+            _             => q.OrderByDescending(u => u.LastLogin),
         };
     }
 }

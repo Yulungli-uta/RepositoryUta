@@ -21,6 +21,8 @@ using WsSeguUta.AuthSystem.API.Infrastructure.Identity.LocalAd;
 using WsSeguUta.AuthSystem.API.Infrastructure.Mapping;
 using WsSeguUta.AuthSystem.API.Infrastructure.Validation;
 using WsSeguUta.AuthSystem.API.Middleware;
+using WsSeguUta.AuthSystem.API.Models.DTOs;
+using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Services;
 using WsSeguUta.AuthSystem.API.Services.Implementations;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
@@ -32,9 +34,11 @@ var builder = WebApplication.CreateBuilder(args);
 // =========================================================
 builder.Host.ConfigureAppConfiguration((hostingContext, config) =>
 {
+    var env = hostingContext.HostingEnvironment;
     config.SetBasePath(Directory.GetCurrentDirectory());
     config.AddJsonFile("Configuration/appsettings.json", optional: false, reloadOnChange: true);
-    if (hostingContext.HostingEnvironment.IsDevelopment())
+    config.AddJsonFile($"Configuration/appsettings.{env.EnvironmentName}.json", optional: true, reloadOnChange: true);
+    if (env.IsDevelopment())
         config.AddUserSecrets<Program>(optional: true);
     config.AddEnvironmentVariables();
 });
@@ -47,18 +51,10 @@ if (string.IsNullOrWhiteSpace(connectionString))
 }
 
 // =========================================================
-// Serilog
+// Serilog — configuración leída desde appsettings.json
 // =========================================================
-Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-    .Enrich.FromLogContext()
-    .WriteTo.Console()
-    .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day)
-    .CreateLogger();
-
-builder.Logging.ClearProviders();
-builder.Logging.AddSerilog(Log.Logger);
-builder.Host.UseSerilog();
+builder.Host.UseSerilog((context, config) =>
+    config.ReadFrom.Configuration(context.Configuration));
 
 // =========================================================
 // DB
@@ -73,7 +69,17 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient();
 builder.Services.AddAutoMapper(typeof(MappingProfile));
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(opt =>
+    {
+        // Deshabilitar el filtro automático de ModelState inválido para poder
+        // suprimir errores de campos generados internamente (ej: Email en provisioning).
+        opt.SuppressModelStateInvalidFilter = true;
+    })
+    .AddJsonOptions(opt =>
+    {
+        opt.JsonSerializerOptions.RespectRequiredConstructorParameters = false;
+    });
 builder.Services.AddValidators();
 
 // =========================================================
@@ -81,7 +87,13 @@ builder.Services.AddValidators();
 // =========================================================
 var cors = builder.Configuration.GetSection("Cors");
 var corsName = cors["PolicyName"] ?? "Frontend";
-var origins = cors.GetSection("Origins").Get<string[]>() ?? Array.Empty<string>();
+var configOrigins = cors.GetSection("Origins").Get<string[]>() ?? Array.Empty<string>();
+
+// Orígenes de desarrollo/pruebas siempre presentes para que funcione desde localhost
+// aunque el appsettings.json del servidor no los tenga explícitamente.
+var devOrigins = new[] { "http://localhost:5173", "http://localhost:3000", "http://localhost:5010" };
+var origins = configOrigins.Concat(devOrigins).Distinct().ToArray();
+
 var allowCred = bool.TryParse(cors["AllowCredentials"], out var ac) && ac;
 var allowedHeaders = cors.GetSection("AllowedHeaders").Get<string[]>();
 var allowedMethods = cors.GetSection("AllowedMethods").Get<string[]>();
@@ -90,10 +102,8 @@ builder.Services.AddCors(opt =>
 {
     opt.AddPolicy(corsName, policy =>
     {
-        if (origins.Length > 0)
-            policy.WithOrigins(origins);
-        else
-            policy.AllowAnyOrigin();
+        // WithOrigins + AllowCredentials es la combinación correcta para SignalR
+        policy.WithOrigins(origins);
 
         if (allowedHeaders is { Length: > 0 })
             policy.WithHeaders(allowedHeaders);
@@ -200,6 +210,8 @@ builder.Services.AddScoped<IAuthRepository, AuthRepository>();
 builder.Services.AddScoped<IRoleRepository, RoleRepository>();
 builder.Services.AddScoped<IMenuRepository, MenuRepository>();
 builder.Services.AddScoped<IUserPermissionRepository, UserPermissionRepository>();
+builder.Services.AddScoped<IApplicationRepository, ApplicationRepository>();
+builder.Services.AddScoped<IClientApplicationService, ClientApplicationService>();
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
@@ -210,6 +222,12 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IWebSocketConnectionService, WebSocketConnectionService>();
 builder.Services.AddScoped<IUserPermissionService, UserPermissionService>();
 builder.Services.AddScoped<IUserRegistrationService, UserRegistrationService>();
+builder.Services.AddScoped<IInstitutionalEmailGenerator, InstitutionalEmailGenerator>();
+builder.Services.AddScoped<IEmployeeProvisioningService, EmployeeProvisioningService>();
+builder.Services.AddScoped<IStudentProvisioningService, StudentProvisioningService>();
+builder.Services.AddScoped<IMicrosoftLicenseService, MicrosoftLicenseService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<ISessionManagementService, SessionManagementService>();
 
 // =========================================================
 // Azure Management Service
@@ -267,12 +285,17 @@ builder.Services.AddSignalR(options =>
 builder.Services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
 builder.Services.AddScoped(typeof(ICrudService<,,>), typeof(CrudService<,,>));
 
+// Servicios específicos que sobreescriben el CrudService genérico para agregar lógica de negocio
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICrudService<UserRole, CreateUserRoleDto, UpdateUserRoleDto>, UserRoleService>();
+
 builder.Services.AddSingleton<WsSeguUta.AuthSystem.API.Security.JwtTokenService>();
 
 // =========================================================
 // Multi-provider Identity
 // =========================================================
 builder.Services.Configure<LocalAdOptions>(builder.Configuration.GetSection(LocalAdOptions.Section));
+builder.Services.Configure<ProvisioningOptions>(builder.Configuration.GetSection(ProvisioningOptions.Section));
 
 builder.Services.AddScoped<IIdentityProvider, EntraIdIdentityProvider>();
 builder.Services.AddScoped<IIdentityProvider, LocalAdIdentityProvider>();
@@ -294,6 +317,28 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 // Pipeline
 // =========================================================
 var app = builder.Build();
+
+// Intercepta OPTIONS preflights ANTES de routing porque SignalR negotiate solo registra POST
+// y UseCors() con RequireCors() no agrega headers cuando no hay endpoint match para OPTIONS.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+    {
+        var origin = context.Request.Headers.Origin.ToString();
+        if (!string.IsNullOrEmpty(origin) && origins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = 204;
+            context.Response.Headers["Access-Control-Allow-Origin"] = origin;
+            context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
+            context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+            context.Response.Headers["Access-Control-Allow-Headers"] = "content-type, authorization, x-requested-with, x-signalr-user-agent";
+            context.Response.Headers["Access-Control-Max-Age"] = "86400";
+            context.Response.Headers["Vary"] = "Origin";
+            return;
+        }
+    }
+    await next();
+});
 
 app.UseSerilogRequestLogging();
 app.UseForwardedHeaders();

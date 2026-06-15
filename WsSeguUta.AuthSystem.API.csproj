@@ -7,6 +7,11 @@
     <UserSecretsId>2394f7d3-e246-461f-9f3c-e200ef3f3332</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
+    <Content Update="Configuration\appsettings.Production.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/>
+    <Content Update="Configuration\web.config" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.8" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.8" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">

@@ -15,15 +15,19 @@ namespace WsSeguUta.AuthSystem.API.Data.Configurations
             b.HasIndex(x=>x.Email).IsUnique(); 
         } 
     }
-  public class UserEmployeeConfiguration : IEntityTypeConfiguration<UserEmployee> { 
-        public void Configure(EntityTypeBuilder<UserEmployee> b){
-            b.ToTable("tbl_UserEmployees","auth");
-            b.HasKey(x=>x.Id); 
-            b.Property(x=>x.EmployeeEmail).HasMaxLength(150).IsRequired(); 
-            b.Property(x=>x.IsActive).HasDefaultValue(true); 
-            b.HasIndex(x=>x.UserId); 
-        } 
-    }
+  public class UserEmployeeConfiguration : IEntityTypeConfiguration<UserEmployee>
+  {
+        public void Configure(EntityTypeBuilder<UserEmployee> b)
+        {
+            b.ToTable("tbl_UserEmployees", "auth");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.EmployeeEmail).HasMaxLength(150).IsRequired();
+            b.Property(x => x.HrEmployeeId);
+            b.Property(x => x.IsActive).HasDefaultValue(true);
+            b.HasIndex(x => x.UserId);
+            b.HasIndex(x => x.HrEmployeeId);
+        }
+  }
   public class AppParamConfiguration : IEntityTypeConfiguration<AppParam> { public void Configure(EntityTypeBuilder<AppParam> b){ b.ToTable("tbl_AppParams","auth"); b.HasKey(x=>x.Nemonic); b.Property(x=>x.Nemonic).HasMaxLength(100); b.Property(x=>x.DataType).HasMaxLength(50).HasDefaultValue("string"); b.Property(x=>x.Category).HasMaxLength(100).HasDefaultValue("General"); b.Property(x=>x.Description).HasMaxLength(300); b.Property(x=>x.IsEncrypted).HasDefaultValue(false); b.Property(x=>x.LastModified).HasDefaultValueSql("SYSUTCDATETIME()"); b.Property(x=>x.ModifiedBy).HasMaxLength(320); } }
   public class LocalUserCredentialConfiguration : IEntityTypeConfiguration<LocalUserCredential> { public void Configure(EntityTypeBuilder<LocalUserCredential> b){ b.ToTable("tbl_LocalUserCredentials","auth"); b.HasKey(x=>x.UserId); b.Property(x=>x.PasswordHash).HasMaxLength(255).IsRequired(); b.Property(x=>x.MustChangePassword).HasDefaultValue(false); b.Property(x=>x.FailedAttempts).HasDefaultValue(0); b.Property(x=>x.IsLocked).HasDefaultValue(false); b.Property(x=>x.TwoFactorEnabled).HasDefaultValue(false); } }
   public class SecurityTokenConfiguration : IEntityTypeConfiguration<SecurityToken> { public void Configure(EntityTypeBuilder<SecurityToken> b){ b.ToTable("tbl_SecurityTokens","auth"); b.HasKey(x=>x.Id); b.Property(x=>x.TokenType).HasMaxLength(20).IsRequired(); b.Property(x=>x.TokenHash).HasMaxLength(256).IsRequired(); b.Property(x=>x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()"); b.HasIndex(x=>x.ExpiresAt); b.HasIndex(x=>new { x.UserId, x.TokenType }); } }
@@ -44,7 +48,22 @@ namespace WsSeguUta.AuthSystem.API.Data.Configurations
     }
   public class MenuItemConfiguration : IEntityTypeConfiguration<MenuItem> { public void Configure(EntityTypeBuilder<MenuItem> b){ b.ToTable("tbl_MenuItems","auth"); b.HasKey(x=>x.Id); b.Property(x=>x.Name).HasMaxLength(100).IsRequired(); b.Property(x=>x.Url).HasMaxLength(300); b.Property(x=>x.Icon).HasMaxLength(100); b.Property(x=>x.ModuleName).HasMaxLength(100); b.Property(x=>x.IsVisible).HasDefaultValue(true); b.Property(x=>x.IsDeleted).HasDefaultValue(false); } }
   public class RoleMenuItemConfiguration : IEntityTypeConfiguration<RoleMenuItem> { public void Configure(EntityTypeBuilder<RoleMenuItem> b){ b.ToTable("tbl_RoleMenuItems","auth"); b.HasKey(x=> new { x.RoleId, x.MenuItemId }); b.Property(x=>x.IsVisible).HasDefaultValue(true); } }
-  public class UserSessionConfiguration : IEntityTypeConfiguration<UserSession> { public void Configure(EntityTypeBuilder<UserSession> b){ b.ToTable("tbl_UserSessions","auth"); b.HasKey(x=>x.SessionId); b.Property(x=>x.RefreshToken).HasMaxLength(500).IsRequired(); b.Property(x=>x.Status).HasMaxLength(16).HasDefaultValue("Active"); b.Property(x=>x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()"); b.Property(x=>x.IsActive).HasDefaultValue(true); b.HasIndex(x=>new { x.UserId, x.IsActive, x.ExpiresAt }); } }
+  public class UserSessionConfiguration : IEntityTypeConfiguration<UserSession>
+  {
+      public void Configure(EntityTypeBuilder<UserSession> b)
+      {
+          b.ToTable("tbl_UserSessions", "auth");
+          b.HasKey(x => x.SessionId);
+          b.Property(x => x.RefreshToken).HasMaxLength(500).IsRequired();
+          b.Property(x => x.Status).HasMaxLength(16).HasDefaultValue("Active");
+          b.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+          b.Property(x => x.IsActive).HasDefaultValue(true);
+          b.Property(x => x.BrowserId).HasMaxLength(128);
+          b.Property(x => x.UserAgent).HasMaxLength(500);
+          b.Property(x => x.RevokedBy).HasMaxLength(320);
+          b.HasIndex(x => new { x.UserId, x.IsActive, x.ExpiresAt });
+      }
+  }
   public class FailedLoginAttemptConfiguration : IEntityTypeConfiguration<FailedLoginAttempt> { public void Configure(EntityTypeBuilder<FailedLoginAttempt> b){ b.ToTable("tbl_FailedLoginAttempts","auth"); b.HasKey(x=>x.Id); b.Property(x=>x.UserEmail).HasMaxLength(320).IsRequired(); b.Property(x=>x.UserAgent).HasMaxLength(400); b.Property(x=>x.IpAddress).HasMaxLength(64); } }
   public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog> { public void Configure(EntityTypeBuilder<AuditLog> b){ b.ToTable("tbl_AuditLog","auth"); b.HasKey(x=>x.Id); b.Property(x=>x.Action).HasMaxLength(100).IsRequired(); b.Property(x=>x.Module).HasMaxLength(100).IsRequired(); b.Property(x=>x.IpAddress).HasMaxLength(64); b.Property(x=>x.UserAgent).HasMaxLength(400); b.Property(x=>x.Timestamp).HasDefaultValueSql("SYSUTCDATETIME()"); b.HasIndex(x=>new { x.UserId, x.Timestamp }); b.HasIndex(x=>new { x.Module, x.Timestamp }); } }
   public class LoginHistoryConfiguration : IEntityTypeConfiguration<LoginHistory> { public void Configure(EntityTypeBuilder<LoginHistory> b){ b.ToTable("tbl_LoginHistory","auth"); b.HasKey(x=>x.Id); b.Property(x=>x.LoginType).HasMaxLength(16).IsRequired(); b.Property(x=>x.LoginStatus).HasMaxLength(16).IsRequired(); b.Property(x=>x.IpAddress).HasMaxLength(64); b.Property(x=>x.UserAgent).HasMaxLength(400); b.Property(x=>x.DeviceInfo).HasMaxLength(300); b.Property(x=>x.LocationInfo).HasMaxLength(200); b.Property(x=>x.LoginDateTime).HasDefaultValueSql("SYSUTCDATETIME()"); b.HasIndex(x=>new { x.UserId, x.LoginDateTime }); } }
@@ -56,13 +75,15 @@ namespace WsSeguUta.AuthSystem.API.Data.Configurations
 
   public class ApplicationConfiguration : IEntityTypeConfiguration<Application>
   {
-    public void Configure(EntityTypeBuilder<Application> b)
-    {
-        b.ToTable("tbl_Applications", "auth");
-        b.HasKey(x => x.Id);       
-        b.Property(x => x.IsActive).HasDefaultValue(true);
-        b.HasIndex(x => x.ClientId);
-    }
+      public void Configure(EntityTypeBuilder<Application> b)
+      {
+          b.ToTable("tbl_Applications", "auth");
+          b.HasKey(x => x.Id);
+          b.Property(x => x.IsActive).HasDefaultValue(true);
+          b.Property(x => x.SecretRotatedBy).HasMaxLength(320);
+          b.Property(x => x.SuspendedBy).HasMaxLength(320);
+          b.HasIndex(x => x.ClientId);
+      }
   }
 
     public class NotificationSubscriptionConfiguration : IEntityTypeConfiguration<NotificationSubscription>
@@ -91,7 +112,39 @@ namespace WsSeguUta.AuthSystem.API.Data.Configurations
         {
             b.ToTable("tbl_WebSocketConnections", "auth");
             b.HasKey(x => x.Id);
-            //b.HasIndex(x => x.ClientId);
+            b.Property(x => x.BrowserId).HasMaxLength(128);
+            b.Property(x => x.IpAddress).HasMaxLength(64);
+            b.Property(x => x.UserAgent).HasMaxLength(500);
+        }
+    }
+
+    public class UserProvisioningConfiguration : IEntityTypeConfiguration<UserProvisioning>
+    {
+        public void Configure(EntityTypeBuilder<UserProvisioning> b)
+        {
+            b.ToTable("tbl_UserProvisioning", "auth");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasDefaultValueSql("NEWID()");
+
+            b.Property(x => x.Email).HasMaxLength(320).IsRequired();
+            b.Property(x => x.DisplayName).HasMaxLength(256).IsRequired();
+            b.Property(x => x.GivenName).HasMaxLength(128);
+            b.Property(x => x.Surname).HasMaxLength(128);
+            b.Property(x => x.DepartmentName).HasMaxLength(256);
+            b.Property(x => x.JobTitle).HasMaxLength(256);
+            b.Property(x => x.EmployeeTypeName).HasMaxLength(128);
+            b.Property(x => x.ProvisioningStatusName).HasMaxLength(64);
+            b.Property(x => x.LocalAdObjectId).HasMaxLength(128);
+            b.Property(x => x.EntraObjectId).HasMaxLength(128);
+            b.Property(x => x.LicenseSkuId).HasMaxLength(256);
+            b.Property(x => x.RequestedBy).HasMaxLength(320);
+            b.Property(x => x.SourceReference).HasMaxLength(128);
+            b.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+
+            b.HasIndex(x => x.HrEmployeeId);
+            b.HasIndex(x => x.Email);
+            b.HasIndex(x => x.ProvisioningStatusId);
+            b.HasIndex(x => x.AuthUserId);
         }
     }
 

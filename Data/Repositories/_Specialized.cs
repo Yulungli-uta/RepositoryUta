@@ -12,6 +12,7 @@ public interface IUserRepository
     Task UpdateLocalCredAsync(LocalUserCredential cred);
     Task SetLastLoginAsync(Guid userId, DateTime when);
     Task<string[]> GetRolesAsync(Guid userId);
+    Task SyncAzureObjectIdAsync(Guid userId, Guid azureObjectId);
 }
 
 public interface IAuthRepository
@@ -37,6 +38,7 @@ public class UserRepository : IUserRepository
     public Task<LocalUserCredential?> GetLocalCredAsync(Guid userId) => _db.LocalUserCredentials.FirstOrDefaultAsync(c => c.UserId == userId);
     public async Task UpdateLocalCredAsync(LocalUserCredential cred) { _db.LocalUserCredentials.Update(cred); await _db.SaveChangesAsync(); }
     public async Task SetLastLoginAsync(Guid userId, DateTime when) { var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId); if (u != null) { u.LastLogin = when; await _db.SaveChangesAsync(); } }
+    public async Task SyncAzureObjectIdAsync(Guid userId, Guid azureObjectId) { var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == userId); if (u != null && u.AzureObjectId != azureObjectId) { u.AzureObjectId = azureObjectId; await _db.SaveChangesAsync(); } }
     public async Task<string[]> GetRolesAsync(Guid userId)
     {
         var q = from ur in _db.UserRoles

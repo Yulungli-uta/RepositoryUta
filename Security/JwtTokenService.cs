@@ -21,6 +21,9 @@ namespace WsSeguUta.AuthSystem.API.Security
         }
 
         public string Create(Guid userId, string email, IEnumerable<string> roles, TimeSpan? lifetime = null)
+            => Create(userId, email, roles, [], lifetime);
+
+        public string Create(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, TimeSpan? lifetime = null)
         {
             var claims = new List<Claim>
             {
@@ -31,6 +34,7 @@ namespace WsSeguUta.AuthSystem.API.Security
                 new(ClaimTypes.Name, email)
             };
             claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+            claims.AddRange(adGroups.Select(g => new Claim("ad_group", g)));
 
             var token = new JwtSecurityToken(
                 _issuer,

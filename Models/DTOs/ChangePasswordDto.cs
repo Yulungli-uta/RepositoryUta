@@ -23,9 +23,12 @@ public record RequestPasswordChange2FAResponse(
     string? OtpCodeDev = null
 );
 
-/// <summary>DTO para cambio de contraseña con doble factor (contraseña actual + nueva + código OTP).</summary>
+/// <summary>
+/// DTO para cambio de contraseña con doble factor.
+/// CurrentPassword es requerida para usuarios locales; se omite para usuarios AzureAD.
+/// </summary>
 public record ChangePasswordWith2FARequest(
-    string CurrentPassword,
+    string? CurrentPassword,
     string NewPassword,
     string OtpCode
 );

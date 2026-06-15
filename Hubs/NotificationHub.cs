@@ -79,8 +79,8 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 // Unirse al grupo específico del navegador
                 await Groups.AddToGroupAsync(Context.ConnectionId, $"browser_{browserId}");
 
-                // Registrar/actualizar conexión (userId opcional, aquí null)
-                await _connectionService.RegisterConnectionAsync(Context.ConnectionId, clientId, null);
+                // Registrar conexión con BrowserId, IP y UserAgent
+                await _connectionService.RegisterConnectionAsync(Context.ConnectionId, clientId, null, browserId);
 
                 _logger.LogInformation(
                     "Client {ConnectionId} joined browser group {BrowserGroup} for app {ClientId}",

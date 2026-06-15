@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
+using WsSeguUta.AuthSystem.API.Infrastructure.Identity.Contracts;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
@@ -21,8 +22,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly AuthDbContext _context;
         private readonly IConfiguration _cfg;
         private readonly ILogger<AuthService> _logger;
+        private readonly IIdentityProviderResolver _identityResolver;
 
-        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger)
+        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger, IIdentityProviderResolver identityResolver)
         {
             _users = users;
             _auth = auth;
@@ -30,6 +32,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             _context = context;
             _cfg = cfg;
             _logger = logger;
+            _identityResolver = identityResolver;
         }
 
         public async Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
@@ -84,7 +87,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             await _users.UpdateLocalCredAsync(cred);
 
             var roles = await _users.GetRolesAsync(u.Id);
-            var access = _tokens.Create(u.Id, u.Email, roles);
+            var adGroups = await GetAdGroupsAsync(u.Email);
+            var access = _tokens.Create(u.Id, u.Email, roles, adGroups);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
             var session = await _auth.CreateSessionAsync(u.Id, access, refreshHash, now.AddDays(7), null, null);
@@ -101,7 +105,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             if (found is null) return null;
             var (sess, u) = found.Value;
             var roles = await _users.GetRolesAsync(u.Id);
-            var newAccess = _tokens.Create(u.Id, u.Email, roles);
+            var adGroups = await GetAdGroupsAsync(u.Email);
+            var newAccess = _tokens.Create(u.Id, u.Email, roles, adGroups);
             var newRefresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var newHash = _tokens.Hash(newRefresh);
             var newExp = DateTime.Now.AddDays(7);
@@ -209,38 +214,45 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             }
         }
 
-        public async Task<bool> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword)
+        public async Task<ChangePasswordResponse> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword)
         {
             var user = await _users.FindByIdAsync(userId);
-            if (user is null || !user.IsActive || !string.Equals(user.UserType, "Local", StringComparison.OrdinalIgnoreCase))
-                return false;
+            if (user is null || !user.IsActive)
+                return new ChangePasswordResponse(false, "Usuario no encontrado o inactivo");
+
+            if (!string.Equals(user.UserType, "Local", StringComparison.OrdinalIgnoreCase))
+                return new ChangePasswordResponse(false, "Este usuario es de tipo AD/Azure y no puede cambiar su contraseña desde aquí");
 
             var cred = await _users.GetLocalCredAsync(userId);
             if (cred is null)
-                return false;
+                return new ChangePasswordResponse(false, "El usuario no tiene credenciales locales");
 
             if (!PasswordHasher.Verify(currentPassword, cred.PasswordHash))
-                return false;
+                return new ChangePasswordResponse(false, "La contraseña actual es incorrecta");
 
             if (PasswordHasher.Verify(newPassword, cred.PasswordHash))
-                return false;
+                return new ChangePasswordResponse(false, "La nueva contraseña no puede ser igual a la actual");
 
             if (!IsPasswordComplex(newPassword))
-                return false;
+                return new ChangePasswordResponse(false, "La nueva contraseña no cumple los requisitos: mínimo 8 caracteres, una mayúscula y un número");
 
             await ApplyPasswordChangeAsync(userId, cred, newPassword);
-            return true;
+            return new ChangePasswordResponse(true, "Contraseña cambiada exitosamente");
         }
 
         public async Task<RequestPasswordChange2FAResponse> RequestPasswordChange2FAAsync(Guid userId, bool isDevelopment = false)
         {
             var user = await _users.FindByIdAsync(userId);
-            if (user is null || !user.IsActive || !string.Equals(user.UserType, "Local", StringComparison.OrdinalIgnoreCase))
-                return new RequestPasswordChange2FAResponse(false, "Usuario no válido para esta operación");
+            if (user is null || !user.IsActive)
+                return new RequestPasswordChange2FAResponse(false, "Usuario no encontrado o inactivo");
 
-            var cred = await _users.GetLocalCredAsync(userId);
-            if (cred is null)
-                return new RequestPasswordChange2FAResponse(false, "El usuario no tiene credenciales locales");
+            // Usuarios locales: verificar que tengan credenciales
+            if (string.Equals(user.UserType, "Local", StringComparison.OrdinalIgnoreCase))
+            {
+                var cred = await _users.GetLocalCredAsync(userId);
+                if (cred is null)
+                    return new RequestPasswordChange2FAResponse(false, "El usuario no tiene credenciales locales");
+            }
 
             // Invalida cualquier OTP previo pendiente para este usuario
             var existing = await _context.SecurityTokens
@@ -316,6 +328,28 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             return new ChangePasswordResponse(true, "Contraseña cambiada exitosamente");
         }
 
+        public async Task<ChangePasswordResponse> VerifyAndConsumePasswordOtpAsync(Guid userId, string otpCode)
+        {
+            var otpHash = _tokens.Hash(otpCode);
+            var token = await _context.SecurityTokens
+                .FirstOrDefaultAsync(t =>
+                    t.UserId == userId &&
+                    t.TokenType == "PasswordChange2FA" &&
+                    t.TokenHash == otpHash &&
+                    !t.IsUsed &&
+                    t.ExpiresAt > DateTime.Now);
+
+            if (token is null)
+            {
+                _logger.LogWarning("OTP inválido o expirado para usuario {UserId}", userId);
+                return new ChangePasswordResponse(false, "El código OTP es inválido o ha expirado");
+            }
+
+            token.IsUsed = true;
+            await _context.SaveChangesAsync();
+            return new ChangePasswordResponse(true, "OTP verificado");
+        }
+
         // ── Helpers ────────────────────────────────────────────────────────────
 
         private async Task ApplyPasswordChangeAsync(Guid userId, LocalUserCredential cred, string newPassword)
@@ -354,5 +388,31 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             password.Length >= 8 &&
             password.Any(char.IsUpper) &&
             password.Any(char.IsDigit);
+
+        private async Task<string[]> GetAdGroupsAsync(string email)
+        {
+            try
+            {
+                ;
+                var dir = _identityResolver.GetDirectory("LocalAd");
+                var adUser = await dir.GetUserByEmailAsync(email);
+                _logger.LogInformation("[AD-GROUPS] Usuario {Email} no encontrado en AD local, se omiten grupos - adUser {adUser}", email, adUser);
+                if (adUser is null)
+                {
+                    _logger.LogInformation("[AD-GROUPS] Usuario {Email} no encontrado en AD local, se omiten grupos", email);
+                    return [];
+                }
+                var groups = await dir.GetUserGroupsAsync(adUser.Id);
+                var names = groups.Select(g => g.Name).ToArray();
+                _logger.LogInformation("[AD-GROUPS] {Count} grupos obtenidos del AD para {Email}: {Groups}",
+                    names.Length, email, string.Join(", ", names));
+                return names;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[AD-GROUPS] Error al consultar AD para {Email}, se continúa sin grupos", email);
+                return [];
+            }
+        }
     }
 }

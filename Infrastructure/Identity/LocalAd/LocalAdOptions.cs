@@ -10,6 +10,9 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Identity.LocalAd
         /// <summary>Puerto LDAP (389) o LDAPS (636).</summary>
         public int Port { get; set; } = 389;
 
+        /// <summary>Puerto LDAPS para operaciones que requieren SSL (unicodePwd). Default: 636.</summary>
+        public int LdapsPort { get; set; } = 636;
+
         /// <summary>Base DN de búsqueda, ej: DC=uta,DC=edu,DC=ec</summary>
         public string BaseDn { get; set; } = "";
 
@@ -22,8 +25,17 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Identity.LocalAd
         /// <summary>Timeout de conexión LDAP en segundos.</summary>
         public int TimeoutSeconds { get; set; } = 10;
 
-        /// <summary>OU donde se crean nuevos usuarios, ej: OU=Usuarios,DC=uta,DC=edu,DC=ec</summary>
-        public string UsersOu { get; set; } = "";
+        /// <summary>OU para funcionarios activos, ej: OU=Activos,OU=USUARIOS,DC=uta,DC=edu,DC=ec</summary>
+        public string FuncionariosActivosOu { get; set; } = "";
+
+        /// <summary>OU para funcionarios inactivos, ej: OU=Inactivos,OU=USUARIOS,DC=uta,DC=edu,DC=ec</summary>
+        public string FuncionariosInactivosOu { get; set; } = "";
+
+        /// <summary>OU para estudiantes activos, ej: OU=Activos,OU=ESTUDIANTES,DC=uta,DC=edu,DC=ec</summary>
+        public string EstudiantesActivosOu { get; set; } = "";
+
+        /// <summary>OU para estudiantes inactivos, ej: OU=Inactivos,OU=ESTUDIANTES,DC=uta,DC=edu,DC=ec</summary>
+        public string EstudiantesInactivosOu { get; set; } = "";
 
         /// <summary>OU donde se crean grupos, ej: OU=Grupos,DC=uta,DC=edu,DC=ec</summary>
         public string GroupsOu { get; set; } = "";

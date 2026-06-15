@@ -64,7 +64,14 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Identity.EntraId
             catch (Exception ex) { _logger.LogError(ex, "Graph ListUsers"); return []; }
         }
 
-        public async Task<DirectoryUser> CreateUserAsync(DirectoryUser user, string initialPassword, bool forcePasswordChange = true, CancellationToken ct = default)
+        public async Task MoveUserToOuAsync(string userObjectId, string targetOuDn, CancellationToken ct = default)
+        {
+            // Entra ID no utiliza OUs de AD local; operación no aplica
+            _logger.LogWarning("EntraId: MoveUserToOuAsync ignorado — Entra ID no gestiona OUs de AD Local. ObjectId={Id}", userObjectId);
+            await Task.CompletedTask;
+        }
+
+        public async Task<DirectoryUser> CreateUserAsync(DirectoryUser user, string initialPassword, string targetOu, bool forcePasswordChange = true, CancellationToken ct = default)
         {
             var domain = _cfg["AzureAd:Domain"] ?? throw new InvalidOperationException("AzureAd:Domain no configurado.");
             var upn = user.Email.Contains('@') ? user.Email : $"{user.Email}@{domain}";
@@ -173,6 +180,42 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Identity.EntraId
         {
             var groups = await GetUserGroupsAsync(userId, ct);
             return groups.Any(g => g.Id == groupId);
+        }
+
+        public async Task<DirectoryGroup> CreateGroupAsync(string groupName, string? description, CancellationToken ct = default)
+        {
+            try
+            {
+                var group = await _graph.Groups.PostAsync(new Group
+                {
+                    DisplayName = groupName,
+                    Description = description,
+                    MailNickname = groupName.Replace(" ", "").ToLower(),
+                    MailEnabled = false,
+                    SecurityEnabled = true,
+                    GroupTypes = [],
+                }, cancellationToken: ct);
+                _logger.LogInformation("EntraId: grupo creado {Name}", groupName);
+                return MapGroup(group!);
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Graph CreateGroup {Name}", groupName); throw; }
+        }
+
+        public async Task ChangeUserPasswordAsync(string userId, string newPassword, bool forcePasswordChange, CancellationToken ct = default)
+        {
+            try
+            {
+                await _graph.Users[userId].PatchAsync(new User
+                {
+                    PasswordProfile = new PasswordProfile
+                    {
+                        Password = newPassword,
+                        ForceChangePasswordNextSignIn = forcePasswordChange,
+                    }
+                }, cancellationToken: ct);
+                _logger.LogInformation("EntraId: contraseña restablecida {Id}", userId);
+            }
+            catch (Exception ex) { _logger.LogError(ex, "Graph ChangeUserPassword {Id}", userId); throw; }
         }
 
         private static DirectoryUser Map(User u) => new(

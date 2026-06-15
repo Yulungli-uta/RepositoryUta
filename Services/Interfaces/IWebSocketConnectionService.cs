@@ -2,7 +2,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
 {
     public interface IWebSocketConnectionService
     {
-        Task RegisterConnectionAsync(string connectionId, string clientId, string? userId = null);
+        Task RegisterConnectionAsync(string connectionId, string clientId, string? userId = null, string? browserId = null);
         Task UnregisterConnectionAsync(string connectionId);
         Task<IEnumerable<string>> GetActiveConnectionsForApplicationAsync(string clientId);
         Task<bool> IsConnectionActiveAsync(string connectionId);

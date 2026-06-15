@@ -37,5 +37,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
         Task<BulkOperationResult> BulkAddUsersToGroupAsync(string groupId, IEnumerable<string> userIds);
 
         Task<SyncResult> SyncUserToLocalDbAsync(string azureObjectId);
+
+        /// <summary>
+        /// Verifica si un usuario existe en Microsoft Entra usando su UPN (userPrincipalName).
+        /// Se usa para determinar el estado de sincronización después de operaciones en AD Local.
+        /// No crea ni modifica ningún objeto en Entra.
+        /// </summary>
+        Task<EntraSyncResult> CheckUserEntraSyncAsync(string upn);
     }
 }

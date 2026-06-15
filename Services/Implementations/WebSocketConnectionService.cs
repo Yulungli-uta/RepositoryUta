@@ -9,14 +9,19 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
     {
         private readonly AuthDbContext _context;
         private readonly ILogger<WebSocketConnectionService> _logger;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public WebSocketConnectionService(AuthDbContext context, ILogger<WebSocketConnectionService> logger)
+        public WebSocketConnectionService(
+            AuthDbContext context,
+            ILogger<WebSocketConnectionService> logger,
+            IHttpContextAccessor httpContextAccessor)
         {
-            _context = context;
-            _logger = logger;
+            _context             = context;
+            _logger              = logger;
+            _httpContextAccessor = httpContextAccessor;
         }
 
-        public async Task RegisterConnectionAsync(string connectionId, string clientId, string? userId = null)
+        public async Task RegisterConnectionAsync(string connectionId, string clientId, string? userId = null, string? browserId = null)
         {
             try
             {
@@ -33,32 +38,44 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 if (!string.IsNullOrEmpty(userId) && Guid.TryParse(userId, out var parsedUserId))
                     userGuid = parsedUserId;
 
-                var now = DateTime.Now;
+                // Capturar IP y UserAgent del contexto HTTP actual
+                var httpContext = _httpContextAccessor.HttpContext;
+                var ipAddress   = httpContext?.Connection.RemoteIpAddress?.ToString();
+                var userAgent   = httpContext?.Request.Headers.UserAgent.ToString();
+
+                var now = DateTime.UtcNow;
                 var existing = await _context.WebSocketConnections
                     .FirstOrDefaultAsync(c => c.ConnectionId == connectionId);
 
                 if (existing != null)
                 {
-                    existing.IsActive = true;
+                    existing.IsActive    = true;
                     existing.ConnectedAt = now;
-                    existing.LastPingAt = now;
-                    existing.UserId = userGuid;
+                    existing.LastPingAt  = now;
+                    existing.UserId      = userGuid ?? existing.UserId;
+                    if (!string.IsNullOrEmpty(browserId))   existing.BrowserId  = browserId;
+                    if (!string.IsNullOrEmpty(ipAddress))   existing.IpAddress  = ipAddress;
+                    if (!string.IsNullOrEmpty(userAgent))   existing.UserAgent  = userAgent;
                 }
                 else
                 {
                     _context.WebSocketConnections.Add(new WebSocketConnection
                     {
                         ApplicationId = application.Id,
-                        ConnectionId = connectionId,
-                        UserId = userGuid,
-                        ConnectedAt = now,
-                        LastPingAt = now,
-                        IsActive = true
+                        ConnectionId  = connectionId,
+                        UserId        = userGuid,
+                        BrowserId     = browserId,
+                        IpAddress     = ipAddress,
+                        UserAgent     = userAgent,
+                        ConnectedAt   = now,
+                        LastPingAt    = now,
+                        IsActive      = true,
                     });
                 }
 
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("Conexión WebSocket registrada: {ConnectionId} para app {ClientId}", connectionId, clientId);
+                _logger.LogInformation("Conexión WebSocket registrada: {ConnectionId} para app {ClientId} (browserId={BrowserId})",
+                    connectionId, clientId, browserId ?? "null");
             }
             catch (Exception ex)
             {

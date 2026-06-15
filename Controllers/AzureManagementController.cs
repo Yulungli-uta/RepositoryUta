@@ -132,10 +132,10 @@ public class AzureManagementController : ControllerBase
         [FromQuery] int pageSize = 50,
         [FromQuery] string? filter = null)
     {
-        _logger.LogInformation($"*************************Listing users: page={page}, pageSize={pageSize}, filter={filter}");
+        //_logger.LogInformation($"*************************Listing users: page={page}, pageSize={pageSize}, filter={filter}");
         var result = await _azureMgmt.ListUsersFromAzureAsync(page, pageSize, filter);
         string jsonResult = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
-        _logger.LogInformation("Resultado de Azure:\n{Data}", jsonResult);
+        //_logger.LogInformation("Resultado de Azure:\n{Data}", jsonResult);
         return Ok(ApiResponse.Ok(result));
     }
 
@@ -222,7 +222,7 @@ public class AzureManagementController : ControllerBase
     [HttpGet("users/{id}/azure-roles")]
     public async Task<IActionResult> GetUserAzureRoles(string id)
     {
-        _logger.LogInformation($"*************************Listing AzureAD roles -GetUserAzureRoles : userid={id}");
+        //_logger.LogInformation($"*************************Listing AzureAD roles -GetUserAzureRoles : userid={id}");
         var roles = await _azureMgmt.GetUserAzureRolesAsync(id);
 
         // Serializar a JSON con formato legible
@@ -233,9 +233,9 @@ public class AzureManagementController : ControllerBase
                 WriteIndented = true
             });
 
-        _logger.LogInformation($"AzureAD Roles response JSON: {rolesJson}");
+        //_logger.LogInformation($"AzureAD Roles response JSON: {rolesJson}");
         
-        _logger.LogInformation($"*************************Listing AzureAD user -GetUserFromAzureAsync : userid={id}");
+        //_logger.LogInformation($"*************************Listing AzureAD user -GetUserFromAzureAsync : userid={id}");
         var user = await _azureMgmt.GetUserFromAzureAsync(id);
 
         
@@ -245,7 +245,7 @@ public class AzureManagementController : ControllerBase
            {
                WriteIndented = true
            });
-        _logger.LogInformation($"AzureAD user response JSON: {userJson}");
+        //_logger.LogInformation($"AzureAD user response JSON: {userJson}");
         _logger.LogInformation($"*************************Listing AzureAD user -GetUserAzureGroupsAsync : userid={id}");
         var userGroups = await _azureMgmt.GetUserAzureGroupsAsync(id);
         var userGroupsJson = System.Text.Json.JsonSerializer.Serialize(

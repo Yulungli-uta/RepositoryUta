@@ -41,9 +41,14 @@ public class AuthDbContext : DbContext
     public DbSet<WebSocketMessage> WebSocketMessages => Set<WebSocketMessage>();
     public DbSet<WebSocketStats> WebSocketStats => Set<WebSocketStats>();
     
+    // ========== APROVISIONAMIENTO DE EMPLEADOS ==========
+    public DbSet<UserProvisioning> UserProvisionings => Set<UserProvisioning>();
+
     // ========== VISTAS SQL ==========
     public DbSet<VwUserRole> VwUserRoles { get; set; }
     public DbSet<VwRoleMenuItem> VwRoleMenuItems { get; set; }
+    public DbSet<VwActiveSession> VwActiveSessions { get; set; }
+    public DbSet<VwActiveApiClient> VwActiveApiClients { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -73,8 +78,7 @@ public class AuthDbContext : DbContext
         modelBuilder.ApplyConfiguration(new NotificationSubscriptionConfiguration());
         modelBuilder.ApplyConfiguration(new NotificationLogConfiguration());
         modelBuilder.ApplyConfiguration(new WebSocketConnectionsConfiguration());
-
-
+        modelBuilder.ApplyConfiguration(new UserProvisioningConfiguration());
 
         modelBuilder.Entity<LocalUserCredential>(e =>
         {
@@ -88,6 +92,8 @@ public class AuthDbContext : DbContext
         // Configuración de vistas SQL
         modelBuilder.Entity<VwUserRole>().HasNoKey().ToView("vw_UserRoles", "auth");
         modelBuilder.Entity<VwRoleMenuItem>().HasNoKey().ToView("vw_RoleMenuItems", "auth");
+        modelBuilder.Entity<VwActiveSession>().HasNoKey().ToView("vw_ActiveSessions", "auth");
+        modelBuilder.Entity<VwActiveApiClient>().HasNoKey().ToView("vw_ActiveApiClients", "auth");
 
         base.OnModelCreating(modelBuilder);
 
