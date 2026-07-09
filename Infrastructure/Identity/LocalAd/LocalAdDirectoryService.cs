@@ -44,7 +44,7 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Identity.LocalAd
                 using var conn = BuildServiceConnection();
                 var attrs = UserAttributes();
                 var req = new SearchRequest(_opts.BaseDn, ldapFilter, SearchScope.Subtree, attrs);
-                var resp = (SearchResponse)conn.SendRequest(req);
+                var resp = (SearchResponse)SendRequestDiagnosed(conn, req);
 
                 return resp.Entries
                     .Cast<SearchResultEntry>()
@@ -459,11 +459,36 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Identity.LocalAd
             return conn;
         }
 
+        /// <summary>
+        /// Envía la solicitud LDAP y diagnostica el error "successful bind must be completed"
+        /// (LdapErr DSID-0C090D5C), que ocurre cuando el Bind() no lanzó excepción pero el AD
+        /// rechazó la sesión igualmente. Es típico de la CONTRASEÑA EXPIRADA de la cuenta de
+        /// SERVICIO (no la cuenta personal del usuario que está iniciando sesión).
+        /// </summary>
+        private DirectoryResponse SendRequestDiagnosed(LdapConnection conn, DirectoryRequest req)
+        {
+            try
+            {
+                return conn.SendRequest(req);
+            }
+            catch (DirectoryOperationException ex) when (
+                ex.Message.Contains("successful bind must be completed", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogError(ex,
+                    "[AD-AUTH] El bind LDAP con la CUENTA DE SERVICIO '{ServiceAccount}' contra {Server}:{Port} " +
+                    "no autenticó realmente la sesión (no es un error de tu cuenta personal de usuario). " +
+                    "Causa más probable: la contraseña de la cuenta de servicio '{ServiceAccount}' expiró o fue bloqueada en AD. " +
+                    "Verifica/restablece su contraseña y actualiza LocalAd:ServiceAccountPassword.",
+                    _opts.ServiceAccountDn, _opts.Server, _opts.Port, _opts.ServiceAccountDn);
+                throw;
+            }
+        }
+
         private DirectoryUser? SearchSingleUser(string filter, CancellationToken ct)
         {
             using var conn = BuildServiceConnection();
             var req = new SearchRequest(_opts.BaseDn, filter, SearchScope.Subtree, UserAttributes());
-            var resp = (SearchResponse)conn.SendRequest(req);
+            var resp = (SearchResponse)SendRequestDiagnosed(conn, req);
             return resp.Entries.Count == 0 ? null : MapUser(resp.Entries[0]);
         }
 

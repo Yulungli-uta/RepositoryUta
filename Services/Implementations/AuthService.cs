@@ -3,7 +3,6 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using System.Text;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Infrastructure.Identity.Contracts;
@@ -11,6 +10,7 @@ using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
 using WsSeguUta.AuthSystem.API.Utilities;
+using WsSeguUta.AuthSystem.API.Security;
 
 namespace WsSeguUta.AuthSystem.API.Services.Implementations
 {
@@ -23,8 +23,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly IConfiguration _cfg;
         private readonly ILogger<AuthService> _logger;
         private readonly IIdentityProviderResolver _identityResolver;
+        private readonly RsaKeyProvider _keys;
 
-        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger, IIdentityProviderResolver identityResolver)
+        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger, IIdentityProviderResolver identityResolver, RsaKeyProvider keys)
         {
             _users = users;
             _auth = auth;
@@ -33,6 +34,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             _cfg = cfg;
             _logger = logger;
             _identityResolver = identityResolver;
+            _keys = keys;
         }
 
         public async Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
@@ -88,7 +90,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
             var roles = await _users.GetRolesAsync(u.Id);
             var adGroups = await GetAdGroupsAsync(u.Email);
-            var access = _tokens.Create(u.Id, u.Email, roles, adGroups);
+            var hrEmployeeId = await _users.GetHrEmployeeIdAsync(u.Id);
+            var access = _tokens.Create(u.Id, u.Email, roles, adGroups, hrEmployeeId);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
             var session = await _auth.CreateSessionAsync(u.Id, access, refreshHash, now.AddDays(7), null, null);
@@ -106,7 +109,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var (sess, u) = found.Value;
             var roles = await _users.GetRolesAsync(u.Id);
             var adGroups = await GetAdGroupsAsync(u.Email);
-            var newAccess = _tokens.Create(u.Id, u.Email, roles, adGroups);
+            var hrEmployeeId = await _users.GetHrEmployeeIdAsync(u.Id);
+            var newAccess = _tokens.Create(u.Id, u.Email, roles, adGroups, hrEmployeeId);
             var newRefresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var newHash = _tokens.Hash(newRefresh);
             var newExp = DateTime.Now.AddDays(7);
@@ -141,7 +145,6 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 {
                     _logger.LogDebug("Token recibido en formato JWT válido");
 
-                    var key = _cfg["Jwt:Key"]!;
                     var issuer = _cfg["Jwt:Issuer"] ?? "WsSeguUta.AuthSystem.API";
                     var audience = _cfg["Jwt:Audience"] ?? "WsSeguUta.AuthSystem.API";
 
@@ -153,7 +156,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                         ValidateIssuerSigningKey = true,
                         ValidIssuer = issuer,
                         ValidAudience = audience,
-                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
+                        IssuerSigningKey = _keys.PublicKey,
                         ClockSkew = TimeSpan.Zero
                     };
 

@@ -39,7 +39,7 @@ namespace WsSeguUta.AuthSystem.API.Data.Configurations
   public class UserRoleConfiguration : IEntityTypeConfiguration<UserRole> {
         public void Configure(EntityTypeBuilder<UserRole> b){ 
             b.ToTable("tbl_UserRoles","auth"); 
-            b.HasKey(x=> new { x.UserId, x.RoleId, x.AssignedAt }); 
+            b.HasKey(x=> new { x.UserId, x.RoleId });
             b.Property(x=>x.AssignedBy).HasMaxLength(320); 
             b.Property(x=>x.Reason).HasMaxLength(300); 
             b.Property(x=>x.AssignedAt).HasDefaultValueSql("SYSUTCDATETIME()"); 

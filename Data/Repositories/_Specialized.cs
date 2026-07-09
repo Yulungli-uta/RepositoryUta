@@ -13,6 +13,7 @@ public interface IUserRepository
     Task SetLastLoginAsync(Guid userId, DateTime when);
     Task<string[]> GetRolesAsync(Guid userId);
     Task SyncAzureObjectIdAsync(Guid userId, Guid azureObjectId);
+    Task<int?> GetHrEmployeeIdAsync(Guid userId);
 }
 
 public interface IAuthRepository
@@ -47,6 +48,14 @@ public class UserRepository : IUserRepository
                       && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.Now)
                 select r.Name;
         return await q.ToArrayAsync();
+    }
+
+    public async Task<int?> GetHrEmployeeIdAsync(Guid userId)
+    {
+        return await _db.UserEmployees
+            .Where(ue => ue.UserId == userId)
+            .Select(ue => ue.HrEmployeeId)
+            .FirstOrDefaultAsync();
     }
 }
 

@@ -143,7 +143,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             _logger.LogInformation("***************usuario tiene roles: {roles}", roles);
             var adGroups = await GetAdGroupsAsync(email);
             _logger.LogInformation("***************usuario tiene roles: {adGroups}", adGroups);
-            var access = _tokens.Create(user.Id, email, roles, adGroups);
+            var hrEmployeeId = await _users.GetHrEmployeeIdAsync(user.Id);
+            var access = _tokens.Create(user.Id, email, roles, adGroups, hrEmployeeId);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
             var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, DateTime.Now.AddDays(7), null, null);

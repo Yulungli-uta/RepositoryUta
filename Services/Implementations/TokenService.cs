@@ -11,11 +11,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         public TokenService(JwtTokenService jwt) => _jwt = jwt;
 
-        public string Create(Guid userId, string email, IEnumerable<string> roles) =>
-            _jwt.Create(userId, email, roles);
+        public string Create(Guid userId, string email, IEnumerable<string> roles, int? hrEmployeeId = null) =>
+            _jwt.Create(userId, email, roles, [], null, hrEmployeeId);
 
-        public string Create(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups) =>
-            _jwt.Create(userId, email, roles, adGroups);
+        public string Create(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, int? hrEmployeeId = null) =>
+            _jwt.Create(userId, email, roles, adGroups, null, hrEmployeeId);
 
         public string Hash(string input) =>
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)));

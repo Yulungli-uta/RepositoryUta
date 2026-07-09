@@ -71,7 +71,7 @@ public class SessionManagementService : ISessionManagementService
         // 1. Marcar sesión como revocada en BD
         session.IsActive      = false;
         session.Status        = "Revoked";
-        session.RevokedAt     = DateTime.UtcNow;
+        session.RevokedAt     = DateTime.Now;
         session.RevokedBy     = revokedBy;
 
         // 2. Buscar conexión WS activa vinculada por BrowserId
@@ -92,7 +92,7 @@ public class SessionManagementService : ISessionManagementService
                             eventType  = "ForceLogout",
                             sessionId  = sessionId.ToString(),
                             reason     = "Sesión revocada por administrador",
-                            timestamp  = DateTime.UtcNow.ToString("o"),
+                            timestamp  = DateTime.Now.ToString("o"),
                             revokedBy,
                         }, ct);
                     notified = true;
@@ -139,7 +139,7 @@ public class SessionManagementService : ISessionManagementService
         {
             session.IsActive  = false;
             session.Status    = "Revoked";
-            session.RevokedAt = DateTime.UtcNow;
+            session.RevokedAt = DateTime.Now;
             session.RevokedBy = revokedBy;
 
             if (!string.IsNullOrEmpty(session.BrowserId))
@@ -158,7 +158,7 @@ public class SessionManagementService : ISessionManagementService
                                 eventType = "ForceLogout",
                                 sessionId = session.SessionId.ToString(),
                                 reason    = "Todas las sesiones revocadas por administrador",
-                                timestamp = DateTime.UtcNow.ToString("o"),
+                                timestamp = DateTime.Now.ToString("o"),
                                 revokedBy,
                             }, ct);
                         notified++;
@@ -221,12 +221,12 @@ public class SessionManagementService : ISessionManagementService
             ?? throw new InvalidOperationException($"Aplicación {applicationId} no encontrada.");
 
         app.IsActive    = !app.IsActive;
-        app.ModifiedAt  = DateTime.UtcNow;
+        app.ModifiedAt  = DateTime.Now;
         app.ModifiedBy  = changedBy;
 
         if (!app.IsActive)
         {
-            app.SuspendedAt = DateTime.UtcNow;
+            app.SuspendedAt = DateTime.Now;
             app.SuspendedBy = changedBy;
         }
         else
@@ -265,9 +265,9 @@ public class SessionManagementService : ISessionManagementService
         var newSecretHash = _tokenService.Hash(newSecret);
 
         app.ClientSecretHash = newSecretHash;
-        app.SecretRotatedAt  = DateTime.UtcNow;
+        app.SecretRotatedAt  = DateTime.Now;
         app.SecretRotatedBy  = rotatedBy;
-        app.ModifiedAt       = DateTime.UtcNow;
+        app.ModifiedAt       = DateTime.Now;
         app.ModifiedBy       = rotatedBy;
 
         await _context.SaveChangesAsync(ct);

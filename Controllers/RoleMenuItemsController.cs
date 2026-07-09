@@ -1,6 +1,8 @@
 ﻿// Controllers/RoleMenuItemsController.cs
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
@@ -11,7 +13,22 @@ namespace WsSeguUta.AuthSystem.API.Controllers;
 public class RoleMenuItemsController : ControllerBase
 {
     private readonly ICrudService<RoleMenuItem, CreateRoleMenuItemDto, UpdateRoleMenuItemDto> _svc;
-    public RoleMenuItemsController(ICrudService<RoleMenuItem, CreateRoleMenuItemDto, UpdateRoleMenuItemDto> svc) => _svc = svc;
+    private readonly IGenericRepository<RoleMenuItem> _repo;
+    public RoleMenuItemsController(
+        ICrudService<RoleMenuItem, CreateRoleMenuItemDto, UpdateRoleMenuItemDto> svc,
+        IGenericRepository<RoleMenuItem> repo)
+    {
+        _svc = svc;
+        _repo = repo;
+    }
+
+    /// <summary>Retorna TODAS las asignaciones de menú de un rol, sin límite de paginación.</summary>
+    [HttpGet("role/{roleId:int}")]
+    public async Task<IActionResult> GetByRole(int roleId, CancellationToken ct)
+    {
+        var items = await _repo.Query().Where(x => x.RoleId == roleId).ToListAsync(ct);
+        return Ok(ApiResponse.Ok(items));
+    }
 
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default)

@@ -43,7 +43,7 @@ public class AuditService : IAuditService
             UserId     = resolvedUserId,
             IpAddress  = context?.Connection.RemoteIpAddress?.ToString(),
             UserAgent  = context?.Request.Headers.UserAgent.ToString(),
-            Timestamp  = DateTime.UtcNow,
+            Timestamp  = DateTime.Now,
         };
 
         await _auditRepo.AddAsync(entry);

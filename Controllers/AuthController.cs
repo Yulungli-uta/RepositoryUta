@@ -50,7 +50,6 @@ public class AuthController : ControllerBase
         var ua = GetUserAgent();
         var device = GetDeviceInfo();
 
-        Console.WriteLine($"Login attempt for {req.Email}");
         var pair = await _auth.LoginLocalAsync(req.Email, req.Password, ipAddress: ip, userAgent: ua, deviceInfo: device);
         return pair is null ? Unauthorized(ApiResponse.Fail("Credenciales inválidas")) : Ok(ApiResponse.Ok(pair, "Login exitoso"));
     }
@@ -70,7 +69,6 @@ public class AuthController : ControllerBase
         [FromQuery] string? clientId = null,
         [FromQuery] string? browserId = null)
     {
-        Console.WriteLine($"***************Azure URL requested (GET) with clientId: {clientId}");
         try
         {
             var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId);
@@ -94,7 +92,6 @@ public class AuthController : ControllerBase
     [EnableRateLimiting("login")]
     public async Task<IActionResult> AzureUrlPost([FromBody] AzureAuthUrlRequest req)
     {
-        Console.WriteLine($"***************Azure URL requested (POST) with clientId: {req.ClientId}");
         try
         {
             var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId);
@@ -149,7 +146,6 @@ public class AuthController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
-            Console.WriteLine($"***************Azure callback: acceso no autorizado — {ex.Message}");
             return Content(
                 $"<html><body><h3>Acceso no autorizado</h3><p>{ex.Message}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
                 "text/html");
@@ -168,8 +164,6 @@ public class AuthController : ControllerBase
                 //Console.WriteLine($"***************Token parts count: {tokenParts?.Length ?? 0}");
                 if (tokenParts == null || tokenParts.Length != 3)
                 {
-                    Console.WriteLine($"***************ERROR: Token format is invalid. Expected 3 parts, got {tokenParts?.Length ?? 0}");
-                    //Console.WriteLine($"***************Full token: {pair.AccessToken}");
                     // Continuar con el login pero sin notificación
                     //return Ok(ApiResponse.Ok(pair));
                 }
@@ -206,17 +200,7 @@ public class AuthController : ControllerBase
                 {
                     tokenPayload = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(payloadJson);
                     //Console.WriteLine($"***************Payload deserialized successfully. Keys count: {tokenPayload?.Count ?? 0}");
-                    if (tokenPayload != null)
-                    {
-                        //Console.WriteLine("***************Available keys in token payload:");
-                        foreach (var kvp in tokenPayload)
-                        {
-                            var valuePreview = kvp.Value?.ToString();
-                            if (valuePreview?.Length > 100)
-                                valuePreview = valuePreview.Substring(0, 100) + "...";
-                            Console.WriteLine($" - {kvp.Key}: {valuePreview}");
-                        }
-                    }
+                    // (claims del payload disponibles en tokenPayload si se necesitan más abajo)
                 }
                 catch (Exception parseEx)
                 {
@@ -252,10 +236,6 @@ public class AuthController : ControllerBase
                         // Intentar convertir a GUID si es posible, sino usar como string
                         if (Guid.TryParse(foundUserId, out var userId))
                         {
-                            //Console.WriteLine($"***************User ID parsed as GUID: {userId}");
-                            //Console.WriteLine($"***************Preparing to send login notification for user {userId}");
-                            Console.WriteLine($"***************Client IP: {clientIp}, User Agent: {userAgent}, " +
-                                $"ClientId to notify: {clientId ?? "All applications"}, browserId: {browserId}");
                             if (!string.IsNullOrEmpty(clientId))
                             {
                                 //Console.WriteLine($"*************Notifying specific application: {clientId}");

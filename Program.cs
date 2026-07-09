@@ -9,7 +9,6 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using Serilog.Events;
-using System.Text;
 using System.Threading.RateLimiting;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
@@ -89,9 +88,10 @@ var cors = builder.Configuration.GetSection("Cors");
 var corsName = cors["PolicyName"] ?? "Frontend";
 var configOrigins = cors.GetSection("Origins").Get<string[]>() ?? Array.Empty<string>();
 
-// Orígenes de desarrollo/pruebas siempre presentes para que funcione desde localhost
-// aunque el appsettings.json del servidor no los tenga explícitamente.
-var devOrigins = new[] { "http://localhost:5173", "http://localhost:3000", "http://localhost:5010" };
+// Orígenes de desarrollo/pruebas, solo en entorno Development.
+var devOrigins = builder.Environment.IsDevelopment()
+    ? new[] { "http://localhost:5173", "http://localhost:3000", "http://localhost:5010" }
+    : Array.Empty<string>();
 var origins = configOrigins.Concat(devOrigins).Distinct().ToArray();
 
 var allowCred = bool.TryParse(cors["AllowCredentials"], out var ac) && ac;
@@ -141,12 +141,13 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // =========================================================
-// JWT
+// JWT (RS256) — clave pública/privada gestionada por RsaKeyProvider
 // =========================================================
-var jwtKey = builder.Configuration["Jwt:Key"];
-if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
-    throw new InvalidOperationException(
-        "Jwt:Key debe configurarse como variable de entorno con al menos 32 caracteres. No usar valores por defecto en producción.");
+var rsaKeyProviderLogger = LoggerFactory.Create(b => b.AddConsole())
+    .CreateLogger<WsSeguUta.AuthSystem.API.Security.RsaKeyProvider>();
+var rsaKeyProvider = new WsSeguUta.AuthSystem.API.Security.RsaKeyProvider(
+    builder.Configuration, builder.Environment, rsaKeyProviderLogger);
+builder.Services.AddSingleton(rsaKeyProvider);
 
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "WsSeguUta.AuthSystem.API";
 var jwtAud = builder.Configuration["Jwt:Audience"] ?? "WsSeguUta.AuthSystem.API";
@@ -164,7 +165,7 @@ builder.Services
             ValidateLifetime = true,
             ValidIssuer = jwtIssuer,
             ValidAudience = jwtAud,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            IssuerSigningKey = rsaKeyProvider.PublicKey,
             ClockSkew = TimeSpan.FromMinutes(2)
         };
     });
@@ -276,7 +277,7 @@ builder.Services.AddSingleton<Microsoft.Identity.Client.IConfidentialClientAppli
 // SignalR
 builder.Services.AddSignalR(options =>
 {
-    options.EnableDetailedErrors = true;
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
 });
@@ -355,8 +356,11 @@ app.UseAuthorization();
 
 app.UseMiddleware<ErrorHandlerMiddleware>();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 // ✅ Endpoints (una sola vez)
 app.MapControllers().RequireCors(corsName);

@@ -43,7 +43,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 var ipAddress   = httpContext?.Connection.RemoteIpAddress?.ToString();
                 var userAgent   = httpContext?.Request.Headers.UserAgent.ToString();
 
-                var now = DateTime.UtcNow;
+                var now = DateTime.Now;
                 var existing = await _context.WebSocketConnections
                     .FirstOrDefaultAsync(c => c.ConnectionId == connectionId);
 

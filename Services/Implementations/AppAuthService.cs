@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using System.Security.Cryptography;
+using System.Text;
 using WsSeguUta.AuthSystem.API.Data;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Models.Entities;
@@ -36,7 +38,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     return new AppAuthResponse(false, "Invalid client credentials", null, null, null);
                 }
 
-                if (app.ClientSecretHash != _tokenService.Hash(clientSecret))
+                if (!SecretMatches(app.ClientSecretHash, _tokenService.Hash(clientSecret)))
                 {
                     _logger.LogWarning("Secret inválido para aplicación: {ClientId}", clientId);
                     return new AppAuthResponse(false, "Invalid client credentials", null, null, null);
@@ -46,7 +48,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 var expiresAt = DateTime.Now.AddMinutes(60);
                 var token = _tokenService.Create(tokenId, app.ClientId, new[] { "Application" });
 
-                app.LastUsedAt = DateTime.UtcNow;
+                app.LastUsedAt = DateTime.Now;
 
                 _context.LegacyAuthLogs.Add(new LegacyAuthLog
                 {
@@ -56,7 +58,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     AuthType      = "ClientCredentials",
                     IpAddress     = ipAddress ?? "",
                     UserAgent     = userAgent ?? "",
-                    CreatedAt     = DateTime.UtcNow,
+                    CreatedAt     = DateTime.Now,
                 });
                 await _context.SaveChangesAsync();
 
@@ -86,7 +88,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
                 applicationId = app.Id;
 
-                if (app.ClientSecretHash != _tokenService.Hash(clientSecret))
+                if (!SecretMatches(app.ClientSecretHash, _tokenService.Hash(clientSecret)))
                     return await FailLegacyAsync(applicationId, userId, userEmail, "Invalid application credentials", ipAddress, userAgent, startTime);
 
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == userEmail);
@@ -231,6 +233,14 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 _logger.LogError(ex, "Error obteniendo estadísticas de aplicación: {ClientId}", clientId);
                 return null;
             }
+        }
+
+        private static bool SecretMatches(string expectedHash, string actualHash)
+        {
+            var expectedBytes = Encoding.UTF8.GetBytes(expectedHash);
+            var actualBytes = Encoding.UTF8.GetBytes(actualHash);
+            if (expectedBytes.Length != actualBytes.Length) return false;
+            return CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes);
         }
 
         private async Task<LegacyAuthResponse> FailLegacyAsync(Guid? applicationId, Guid? userId, string userEmail, string reason, string? ipAddress, string? userAgent, DateTime startTime)

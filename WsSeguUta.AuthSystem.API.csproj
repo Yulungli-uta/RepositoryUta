@@ -11,6 +11,15 @@
     <Content Update="Configuration\web.config" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/>
   </ItemGroup>
 
+  <!-- Tools/ contiene proyectos de consola independientes (ej. JwtKeyGen); excluidos aqui
+       porque el glob por defecto del SDK compilaria sus .cs junto con este proyecto. -->
+  <ItemGroup>
+    <Compile Remove="Tools\**\*.cs" />
+    <Content Remove="Tools\**" />
+    <None Remove="Tools\**" />
+    <EmbeddedResource Remove="Tools\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.8" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.8" />
@@ -19,6 +28,14 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
+    <!-- Pines explícitos: forzar una única versión de la familia IdentityModel para todo el árbol de dependencias
+         (Auth0.AspNetCore.Authentication arrastraba Microsoft.IdentityModel.Validators 8.6.1, desalineado con
+         System.IdentityModel.Tokens.Jwt 8.12.1 resuelto por el resto del árbol, causando FileNotFoundException en runtime) -->
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.12.1" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.12.1" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.12.1" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.12.1" />
+    <PackageReference Include="Microsoft.IdentityModel.Validators" Version="8.12.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

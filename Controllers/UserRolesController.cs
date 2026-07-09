@@ -28,18 +28,28 @@ public class UserRolesController : ControllerBase
             hasNextPage = pagedEntities.HasNextPage
         });
     }
-    [HttpGet("{userId:guid}/{roleId:int}/{assignedAt}")]
-    public async Task<IActionResult> Get(Guid userId, int roleId, DateTime assignedAt)
-        => (await _svc.GetAsync(userId, roleId, assignedAt)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
+    [HttpGet("{userId:guid}/{roleId:int}")]
+    public async Task<IActionResult> Get(Guid userId, int roleId)
+        => (await _svc.GetAsync(userId, roleId)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateUserRoleDto dto)
-        => Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
+    {
+        try
+        {
+            return Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(ApiResponse.Fail(ex.Message));
+        }
+    }
 
-    [HttpPut]
-    public async Task<IActionResult> Update(int id, [FromBody] UpdateUserRoleDto dto)        
-        => (await _svc.UpdateAsync(id, dto)) is { } e? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
+    [HttpPut("{userId:guid}/{roleId:int}")]
+    public async Task<IActionResult> Update(Guid userId, int roleId, [FromBody] UpdateUserRoleDto dto)
+        => (await _svc.UpdateAsync(new object[] { userId, roleId }, dto)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
 
-    [HttpDelete("{userId:guid}/{roleId:int}/{assignedAt}")]
-    public async Task<IActionResult> Delete(Guid userId, int roleId, DateTime assignedAt)
-        => (await _svc.DeleteAsync(userId, roleId, assignedAt)) ? Ok(ApiResponse.Ok(message: "Eliminado")) : NotFound(ApiResponse.Fail("No existe"));
+    [HttpDelete("{userId:guid}/{roleId:int}")]
+    public async Task<IActionResult> Delete(Guid userId, int roleId)
+        => (await _svc.DeleteAsync(userId, roleId)) ? Ok(ApiResponse.Ok(message: "Eliminado")) : NotFound(ApiResponse.Fail("No existe"));
 }
