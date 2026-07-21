@@ -7,7 +7,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/permissions"), Authorize]
+[ApiController, Route("api/permissions"), Authorize(Roles = "Administrador,R_DITIC")]
 public class PermissionsController : ControllerBase
 {
     private readonly ICrudService<Permission, CreatePermissionDto, UpdatePermissionDto> _svc;

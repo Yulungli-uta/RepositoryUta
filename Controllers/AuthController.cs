@@ -62,16 +62,34 @@ public class AuthController : ControllerBase
         return pair is null ? Unauthorized(ApiResponse.Fail("Refresh token inválido")) : Ok(ApiResponse.Ok(pair));
     }
 
+    /// <summary>
+    /// Cierra la sesión revocando el refresh token en servidor.
+    /// AllowAnonymous porque el access token puede estar ya expirado al momento del logout;
+    /// la credencial es el propio refresh token. Idempotente y sin revelar si el token
+    /// era válido: siempre responde éxito (LogoutAsync ya se comporta así).
+    /// </summary>
+    [HttpPost("logout")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Logout([FromBody] RefreshRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.RefreshToken))
+            return BadRequest(ApiResponse.Fail("Refresh token requerido"));
+
+        await _auth.LogoutAsync(req.RefreshToken);
+        return Ok(ApiResponse.Ok(true, "Sesión cerrada"));
+    }
+
     [HttpGet("azure/url")]
     [AllowAnonymous]
     [EnableRateLimiting("login")]
     public async Task<IActionResult> AzureUrlGet(
         [FromQuery] string? clientId = null,
-        [FromQuery] string? browserId = null)
+        [FromQuery] string? browserId = null,
+        [FromQuery] string? codeChallenge = null)
     {
         try
         {
-            var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId);
+            var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId, codeChallenge);
             return Ok(ApiResponse.Ok(new
             {
                 url,
@@ -94,7 +112,7 @@ public class AuthController : ControllerBase
     {
         try
         {
-            var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId);
+            var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId, req.CodeChallenge);
             return Ok(ApiResponse.Ok(new
             {
                 url,
@@ -108,6 +126,26 @@ public class AuthController : ControllerBase
         {
             return Unauthorized(ApiResponse.Fail(ex.Message));
         }
+    }
+
+    /// <summary>
+    /// Canjea un deliveryCode PKCE (RFC 7636) por el par de tokens real. Solo la pestaña
+    /// que generó el codeVerifier original (nunca transmitido hasta este momento) puede
+    /// completar el intercambio. AllowAnonymous porque la credencial es el propio
+    /// codeVerifier, igual que /refresh usa el refresh token como credencial.
+    /// </summary>
+    [HttpPost("azure/exchange")]
+    [AllowAnonymous]
+    [EnableRateLimiting("login")]
+    public async Task<IActionResult> AzureExchange([FromBody] AzureExchangeRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.DeliveryCode) || string.IsNullOrWhiteSpace(req.CodeVerifier))
+            return BadRequest(ApiResponse.Fail("deliveryCode y codeVerifier son requeridos"));
+
+        var pair = await _azure.ExchangeDeliveryCodeAsync(req.DeliveryCode, req.CodeVerifier);
+        return pair is null
+            ? Unauthorized(ApiResponse.Fail("Código de entrega inválido o expirado"))
+            : Ok(ApiResponse.Ok(pair));
     }
 
     [HttpGet("azure/callback")]
@@ -139,10 +177,24 @@ public class AuthController : ControllerBase
         {
             //Console.WriteLine($"****************Error decoding state: {ex.Message}. Proceeding without clientId.");
         }
+        // Interruptor operativo: permite revertir al instante (sin recompilar) al reparto
+        // directo de tokens por WebSocket si el flujo PKCE presentara algún problema en
+        // producción. Default true si la clave falta o no es parseable — el valor real
+        // queda siempre explícito en appsettings.json.
+        var secureTokenDelivery = bool.TryParse(_cfg["AzureAd:SecureTokenDelivery"], out var std) ? std : true;
+
         TokenPair? pair;
+        string? deliveryCode = null;
         try
         {
-            pair = await _azure.HandleCallbackAsync(code, state);
+            if (secureTokenDelivery)
+            {
+                (pair, deliveryCode) = await _azure.CompleteLoginAndIssueDeliveryCodeAsync(code, state);
+            }
+            else
+            {
+                pair = await _azure.HandleCallbackAsync(code, state);
+            }
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -240,7 +292,7 @@ public class AuthController : ControllerBase
                             {
                                 //Console.WriteLine($"*************Notifying specific application: {clientId}");
                                 await _notificationService.NotifyLoginEventForApplicationAsync(
-                                    userId, "Office365", clientIp, clientId, pair, browserId ?? ""
+                                    userId, "Office365", clientIp, clientId, pair, browserId ?? "", deliveryCode
                                 );
                             }
                             else

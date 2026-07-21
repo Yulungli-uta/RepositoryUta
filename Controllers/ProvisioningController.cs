@@ -10,7 +10,7 @@ namespace WsSeguUta.AuthSystem.API.Controllers;
 /// Todos los endpoints requieren autenticación. Las operaciones de escritura deben
 /// restringirse al rol Administrador en producción.
 /// </summary>
-[ApiController, Route("api/provisioning"), Authorize]
+[ApiController, Route("api/provisioning"), Authorize(Roles = "Administrador,R_DITIC")]
 public class ProvisioningController : ControllerBase
 {
     private readonly IEmployeeProvisioningService _svc;

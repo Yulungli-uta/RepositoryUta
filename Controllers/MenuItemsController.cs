@@ -8,7 +8,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/menu-items"), Authorize]
+[ApiController, Route("api/menu-items"), Authorize(Roles = "Administrador,R_DITIC")]
 public class MenuItemsController : ControllerBase
 {
     private readonly ICrudService<MenuItem, CreateMenuItemDto, UpdateMenuItemDto> _svc;

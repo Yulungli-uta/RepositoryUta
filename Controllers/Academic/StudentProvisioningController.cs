@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
@@ -10,6 +11,7 @@ namespace WsSeguUta.AuthSystem.API.Controllers.Academic;
 /// </summary>
 [ApiController]
 [Route("api/academic/student-provisioning")]
+[Authorize(Roles = "Administrador")]
 public class StudentProvisioningController : ControllerBase
 {
     private readonly IStudentProvisioningService _service;

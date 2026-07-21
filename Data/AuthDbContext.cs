@@ -44,6 +44,11 @@ public class AuthDbContext : DbContext
     // ========== APROVISIONAMIENTO DE EMPLEADOS ==========
     public DbSet<UserProvisioning> UserProvisionings => Set<UserProvisioning>();
 
+    // ========== PERFILES DE ACCESO ==========
+    public DbSet<AccessProfile> AccessProfiles => Set<AccessProfile>();
+    public DbSet<AccessProfileRole> AccessProfileRoles => Set<AccessProfileRole>();
+    public DbSet<UserAccessProfile> UserAccessProfiles => Set<UserAccessProfile>();
+
     // ========== VISTAS SQL ==========
     public DbSet<VwUserRole> VwUserRoles { get; set; }
     public DbSet<VwRoleMenuItem> VwRoleMenuItems { get; set; }
@@ -79,6 +84,9 @@ public class AuthDbContext : DbContext
         modelBuilder.ApplyConfiguration(new NotificationLogConfiguration());
         modelBuilder.ApplyConfiguration(new WebSocketConnectionsConfiguration());
         modelBuilder.ApplyConfiguration(new UserProvisioningConfiguration());
+        modelBuilder.ApplyConfiguration(new AccessProfileConfiguration());
+        modelBuilder.ApplyConfiguration(new AccessProfileRoleConfiguration());
+        modelBuilder.ApplyConfiguration(new UserAccessProfileConfiguration());
 
         modelBuilder.Entity<LocalUserCredential>(e =>
         {
@@ -94,6 +102,24 @@ public class AuthDbContext : DbContext
         modelBuilder.Entity<VwRoleMenuItem>().HasNoKey().ToView("vw_RoleMenuItems", "auth");
         modelBuilder.Entity<VwActiveSession>().HasNoKey().ToView("vw_ActiveSessions", "auth");
         modelBuilder.Entity<VwActiveApiClient>().HasNoKey().ToView("vw_ActiveApiClients", "auth");
+
+        // Soft-delete: cualquier entidad que implemente ISoftDeletable queda excluida
+        // automáticamente de toda consulta EF Core normal (SELECT/paginación/Find) mientras
+        // IsDeleted=true — sin tener que agregar el filtro manualmente en cada consulta.
+        // GenericRepository<T>.DeleteAsync ya marca IsDeleted=true en vez de borrar la fila
+        // cuando la entidad implementa esta interfaz (ver Data/Repositories/_Generic.cs).
+        // No aplica a SQL/Dapper crudo — eso debe filtrar IsDeleted manualmente si lo usa.
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (!typeof(ISoftDeletable).IsAssignableFrom(entityType.ClrType)) continue;
+
+            var parameter = System.Linq.Expressions.Expression.Parameter(entityType.ClrType, "e");
+            var property = System.Linq.Expressions.Expression.Property(parameter, nameof(ISoftDeletable.IsDeleted));
+            var notDeleted = System.Linq.Expressions.Expression.Not(property);
+            var lambda = System.Linq.Expressions.Expression.Lambda(notDeleted, parameter);
+
+            modelBuilder.Entity(entityType.ClrType).HasQueryFilter(lambda);
+        }
 
         base.OnModelCreating(modelBuilder);
 

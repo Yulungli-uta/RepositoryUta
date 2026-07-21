@@ -10,7 +10,7 @@ namespace WsSeguUta.AuthSystem.API.Controllers;
 /// Gestión de sesiones activas de usuarios y clientes API.
 /// Permite listar, revocar sesiones y administrar clientes API (toggle + rotate secret).
 /// </summary>
-[ApiController, Route("api/session-management"), Authorize]
+[ApiController, Route("api/session-management"), Authorize(Roles = "Administrador,R_DITIC")]
 public class SessionManagementController : ControllerBase
 {
     private readonly ISessionManagementService _svc;

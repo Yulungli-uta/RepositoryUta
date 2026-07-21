@@ -7,7 +7,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/security-tokens"), Authorize]
+[ApiController, Route("api/security-tokens"), Authorize(Roles = "Administrador,R_DITIC")]
 public class SecurityTokensController : ControllerBase
 {
     private readonly ICrudService<SecurityToken, CreateSecurityTokenDto, UpdateSecurityTokenDto> _svc;

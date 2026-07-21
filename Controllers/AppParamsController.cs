@@ -7,7 +7,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/app-params"), Authorize]
+[ApiController, Route("api/app-params"), Authorize(Roles = "Administrador,R_DITIC")]
 public class AppParamsController : ControllerBase
 {
     private readonly ICrudService<AppParam, CreateAppParamDto, UpdateAppParamDto> _svc;

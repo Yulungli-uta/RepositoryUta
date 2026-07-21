@@ -57,7 +57,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 throw new UnauthorizedAccessException("Aplicación cliente no autorizada.");
         }
 
-        public async Task<(string Url, string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null)
+        public async Task<(string Url, string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null, string? codeChallenge = null)
         {
             await ValidateClientApplicationAsync(clientId);
 
@@ -69,6 +69,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 stateId = stateGuid,
                 clientId = normalizedClientId,
                 browserId,
+                // Viaja codificado dentro del propio "state" de OAuth: Microsoft lo devuelve
+                // intacto en el callback, así que no hace falta guardarlo aparte en caché.
+                codeChallenge,
                 timestamp = DateTime.Now.ToString("O"),
                 source = "azure_auth"
             };
@@ -144,7 +147,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var adGroups = await GetAdGroupsAsync(email);
             _logger.LogInformation("***************usuario tiene roles: {adGroups}", adGroups);
             var hrEmployeeId = await _users.GetHrEmployeeIdAsync(user.Id);
-            var access = _tokens.Create(user.Id, email, roles, adGroups, hrEmployeeId);
+            var access = await _tokens.CreateAsync(user.Id, email, roles, adGroups, hrEmployeeId);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
             var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, DateTime.Now.AddDays(7), null, null);
@@ -153,6 +156,93 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             await _auth.InsertLoginAsync(user.Id, email, true, "AzureAD", "Success", null, session.SessionId, ipAddress, userAgent, deviceInfo);
 
             return new TokenPair(access, refresh);
+        }
+
+        // Entrada de caché para la entrega PKCE de un solo uso. TokenPair real solo vive
+        // aquí (en memoria del servidor) hasta que se canjea o expira; nunca sale por WebSocket.
+        private sealed class DeliveryCodeEntry
+        {
+            public required TokenPair Pair { get; init; }
+            public required string CodeChallenge { get; init; }
+        }
+
+        private static readonly TimeSpan DeliveryCodeLifetime = TimeSpan.FromSeconds(120);
+
+        public async Task<(TokenPair? Pair, string? DeliveryCode)> CompleteLoginAndIssueDeliveryCodeAsync(
+            string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
+        {
+            // El codeChallenge se lee del propio parámetro "state" (Microsoft lo devuelve
+            // intacto), ANTES de que HandleCallbackAsync consuma la entrada anti-replay de
+            // ms_state — son cachés distintas, no hay conflicto entre ambas lecturas.
+            string? codeChallenge = null;
+            try
+            {
+                var stateJson = Encoding.UTF8.GetString(Convert.FromBase64String(state));
+                var stateData = System.Text.Json.JsonDocument.Parse(stateJson).RootElement;
+                if (stateData.TryGetProperty("codeChallenge", out var ccProp) &&
+                    ccProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    codeChallenge = ccProp.GetString();
+                }
+            }
+            catch
+            {
+                // State no parseable: HandleCallbackAsync lanzará su propia validación abajo.
+            }
+
+            // Reutiliza el método existente TAL CUAL — no se modifica su lógica de validación,
+            // intercambio con Microsoft ni emisión de tokens.
+            var pair = await HandleCallbackAsync(code, state, ipAddress, userAgent, deviceInfo);
+            if (pair is null) return (null, null);
+
+            if (string.IsNullOrWhiteSpace(codeChallenge))
+            {
+                // Cliente que no envió codeChallenge (frontend no actualizado aún): se retorna
+                // el pair para que el llamador decida el fallback de compatibilidad.
+                return (pair, null);
+            }
+
+            var deliveryCode = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            _cache.Set(
+                $"delivery:{deliveryCode}",
+                new DeliveryCodeEntry { Pair = pair, CodeChallenge = codeChallenge },
+                DeliveryCodeLifetime);
+
+            return (pair, deliveryCode);
+        }
+
+        public Task<TokenPair?> ExchangeDeliveryCodeAsync(string deliveryCode, string codeVerifier)
+        {
+            var cacheKey = $"delivery:{deliveryCode}";
+            if (!_cache.TryGetValue(cacheKey, out DeliveryCodeEntry? entry) || entry is null)
+                return Task.FromResult<TokenPair?>(null);
+
+            var computedChallenge = ComputeCodeChallengeBase64Url(codeVerifier);
+
+            // Comparación en tiempo constante: evita filtrar por timing si el challenge
+            // coincide parcialmente.
+            var matches = CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(computedChallenge),
+                Encoding.UTF8.GetBytes(entry.CodeChallenge));
+
+            if (!matches) return Task.FromResult<TokenPair?>(null);
+
+            // Un solo uso: se retira de la caché apenas se valida correctamente.
+            _cache.Remove(cacheKey);
+            return Task.FromResult<TokenPair?>(entry.Pair);
+        }
+
+        /// <summary>
+        /// codeChallenge = base64url(SHA-256(codeVerifier)), según RFC 7636.
+        /// El frontend debe calcularlo con la misma codificación (ver pkce.ts).
+        /// </summary>
+        private static string ComputeCodeChallengeBase64Url(string codeVerifier)
+        {
+            var hash = SHA256.HashData(Encoding.UTF8.GetBytes(codeVerifier));
+            return Convert.ToBase64String(hash)
+                .Replace('+', '-')
+                .Replace('/', '_')
+                .TrimEnd('=');
         }
 
         private async Task<string[]> GetAdGroupsAsync(string email)

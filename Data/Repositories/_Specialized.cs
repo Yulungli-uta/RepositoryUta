@@ -14,12 +14,46 @@ public interface IUserRepository
     Task<string[]> GetRolesAsync(Guid userId);
     Task SyncAzureObjectIdAsync(Guid userId, Guid azureObjectId);
     Task<int?> GetHrEmployeeIdAsync(Guid userId);
+    Task<string?> GetPersonnelEmailAsync(Guid userId);
+}
+
+public interface IAccessProfileAssignmentService
+{
+    /// <summary>Perfiles (activos) asignados actualmente a un usuario.</summary>
+    Task<List<AccessProfile>> GetAssignedProfilesAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Asigna un AccessProfile a un usuario: crea/reactiva (vía IUserRoleService) una fila
+    /// UserRole por cada rol que compone el perfil, marcando su origen (AssignedVia).
+    /// Si el usuario ya tiene alguno de esos roles por otra vía, no lo duplica ni lo toca.
+    /// </summary>
+    Task AssignAsync(Guid userId, int accessProfileId, string? assignedBy, CancellationToken ct = default);
+
+    /// <summary>
+    /// Quita un AccessProfile de un usuario. Por cada rol del perfil, solo revoca el
+    /// UserRole si ningún otro perfil activo del usuario ni una asignación directa lo
+    /// justifican (evita romper accesos compartidos con otros perfiles).
+    /// </summary>
+    Task UnassignAsync(Guid userId, int accessProfileId, string? removedBy, CancellationToken ct = default);
 }
 
 public interface IAuthRepository
 {
     Task<UserSession> CreateSessionAsync(Guid userId, string accessToken, string refreshHash, DateTime expiresAt, string? device, string? ip);
     Task<(UserSession Sess, User User)?> GetActiveSessionByRefreshHashAsync(string refreshHash);
+
+    /// <summary>
+    /// Busca una sesión INACTIVA cuyo refresh token (hash) fue rotado. Se usa para detectar
+    /// reuso de refresh tokens: presentar un token ya rotado es el indicador más fiable de robo.
+    /// </summary>
+    Task<UserSession?> GetRotatedSessionByRefreshHashAsync(string refreshHash);
+
+    /// <summary>
+    /// Revoca en bloque todas las sesiones activas de un usuario (respuesta ante reuso
+    /// de refresh token). Retorna la cantidad de sesiones revocadas.
+    /// </summary>
+    Task<int> RevokeAllActiveSessionsForUserAsync(Guid userId, string reason);
+
     Task RevokeSessionAsync(Guid sessionId, string reason);
     Task RecordFailedAttemptAsync(string email, string? ip, string? agent, string? reason);
     Task InsertLoginAsync(Guid? userId, string emailOrUser, bool ok, string type, string status, string? reason, Guid? sessionId, string? ip, string? agent, string? device);
@@ -57,6 +91,14 @@ public class UserRepository : IUserRepository
             .Select(ue => ue.HrEmployeeId)
             .FirstOrDefaultAsync();
     }
+
+    public async Task<string?> GetPersonnelEmailAsync(Guid userId)
+    {
+        return await _db.UserEmployees
+            .Where(ue => ue.UserId == userId && ue.IsActive)
+            .Select(ue => ue.EmployeeEmail)
+            .FirstOrDefaultAsync();
+    }
 }
 
 public class AuthRepository : IAuthRepository
@@ -79,11 +121,29 @@ public class AuthRepository : IAuthRepository
         return (sess, u);
     }
 
+    public async Task<UserSession?> GetRotatedSessionByRefreshHashAsync(string refreshHash)
+    {
+        return await _db.UserSessions
+            .FirstOrDefaultAsync(x => x.RefreshToken == refreshHash && !x.IsActive && x.Status == "Rotated");
+    }
+
+    public async Task<int> RevokeAllActiveSessionsForUserAsync(Guid userId, string reason)
+    {
+        // Usa el índice (UserId, IsActive, ExpiresAt); revoca en una sola sentencia sin cargar entidades
+        return await _db.UserSessions
+            .Where(x => x.UserId == userId && x.IsActive)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.IsActive, false)
+                .SetProperty(x => x.Status, reason)
+                .SetProperty(x => x.RevokedAt, DateTime.Now)
+                .SetProperty(x => x.RevokedBy, "System"));
+    }
+
     public async Task RevokeSessionAsync(Guid sessionId, string reason)
     {
         var s = await _db.UserSessions.FirstOrDefaultAsync(x => x.SessionId == sessionId);
         if (s is null) return;
-        s.IsActive = false; s.Status = reason ?? "Revoked"; await _db.SaveChangesAsync();
+        s.IsActive = false; s.Status = reason ?? "Revoked"; s.RevokedAt = DateTime.Now; await _db.SaveChangesAsync();
     }
 
     public async Task RecordFailedAttemptAsync(string email, string? ip, string? agent, string? reason)

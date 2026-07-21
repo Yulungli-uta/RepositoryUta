@@ -9,7 +9,7 @@ namespace WsSeguUta.AuthSystem.API.Controllers;
 
 [ApiController]
 [Route("api/roles")]
-[Authorize]
+[Authorize(Roles = "Administrador,R_DITIC")]
 public class RolesController : ControllerBase
 {
     private readonly ICrudService<Role, CreateRoleDto, UpdateRoleDto> _svc;

@@ -10,7 +10,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/users"), Authorize]
+[ApiController, Route("api/users"), Authorize(Roles = "Administrador,R_DITIC")]
 public class UsersController : ControllerBase
 {
     private const int DefaultPageSize = 20;

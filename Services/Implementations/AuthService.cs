@@ -91,7 +91,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var roles = await _users.GetRolesAsync(u.Id);
             var adGroups = await GetAdGroupsAsync(u.Email);
             var hrEmployeeId = await _users.GetHrEmployeeIdAsync(u.Id);
-            var access = _tokens.Create(u.Id, u.Email, roles, adGroups, hrEmployeeId);
+            var access = await _tokens.CreateAsync(u.Id, u.Email, roles, adGroups, hrEmployeeId);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
             var session = await _auth.CreateSessionAsync(u.Id, access, refreshHash, now.AddDays(7), null, null);
@@ -105,18 +105,64 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         {
             var hash = _tokens.Hash(refreshToken);
             var found = await _auth.GetActiveSessionByRefreshHashAsync(hash);
-            if (found is null) return null;
+            if (found is null)
+            {
+                // El hash no corresponde a ninguna sesión activa: puede ser un token
+                // inválido/expirado normal o el reuso de un token ya rotado (robo).
+                await DetectRefreshTokenReuseAsync(hash);
+                return null;
+            }
             var (sess, u) = found.Value;
             var roles = await _users.GetRolesAsync(u.Id);
             var adGroups = await GetAdGroupsAsync(u.Email);
             var hrEmployeeId = await _users.GetHrEmployeeIdAsync(u.Id);
-            var newAccess = _tokens.Create(u.Id, u.Email, roles, adGroups, hrEmployeeId);
+            var newAccess = await _tokens.CreateAsync(u.Id, u.Email, roles, adGroups, hrEmployeeId);
             var newRefresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var newHash = _tokens.Hash(newRefresh);
             var newExp = DateTime.Now.AddDays(7);
             await _auth.RevokeSessionAsync(sess.SessionId, "Rotated");
             await _auth.CreateSessionAsync(u.Id, newAccess, newHash, newExp, sess.DeviceInfo, sess.IpAddress);
             return new TokenPair(newAccess, newRefresh);
+        }
+
+        // Ventana de gracia para refresh concurrentes legítimos (ej.: dos pestañas del
+        // mismo navegador refrescando a la vez). Dentro de esta ventana el reuso no se
+        // trata como robo para no desloguear a usuarios legítimos.
+        private static readonly TimeSpan RefreshReuseGraceWindow = TimeSpan.FromSeconds(60);
+
+        /// <summary>
+        /// Detección de reuso de refresh tokens rotados (OAuth 2.0 Security BCP).
+        /// Presentar un token que ya fue rotado es el indicador más fiable de robo de sesión:
+        /// se revocan todas las sesiones activas del usuario y se registra el evento de
+        /// seguridad. Es best-effort: un fallo aquí nunca altera la respuesta del refresh.
+        /// </summary>
+        private async Task DetectRefreshTokenReuseAsync(string refreshHash)
+        {
+            try
+            {
+                var rotated = await _auth.GetRotatedSessionByRefreshHashAsync(refreshHash);
+                if (rotated is null) return; // hash desconocido: token inválido normal, sin acción
+
+                // Sesiones rotadas antes de este cambio no tienen RevokedAt: sin dato fiable
+                // de cuándo se rotó, no se castiga (evita falsos positivos tras el despliegue).
+                if (rotated.RevokedAt is null) return;
+
+                if (DateTime.Now - rotated.RevokedAt.Value <= RefreshReuseGraceWindow) return;
+
+                var revokedCount = await _auth.RevokeAllActiveSessionsForUserAsync(rotated.UserId, "RefreshReuse");
+                await _auth.InsertLoginAsync(rotated.UserId, string.Empty, false, "Refresh", "TokenReuse",
+                    $"Reuso de refresh token rotado; {revokedCount} sesiones revocadas",
+                    rotated.SessionId, rotated.IpAddress, rotated.UserAgent, rotated.DeviceInfo);
+
+                _logger.LogWarning(
+                    "Reuso de refresh token detectado. UserId: {UserId}, sesión origen: {SessionId}, sesiones revocadas: {Count}",
+                    rotated.UserId, rotated.SessionId, revokedCount);
+            }
+            catch (Exception ex)
+            {
+                // Nunca convertir un refresh fallido en un error 500 por la detección
+                _logger.LogError(ex, "Error en la detección de reuso de refresh token");
+            }
         }
 
         public async Task<bool> LogoutAsync(string refreshToken)
@@ -133,7 +179,43 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var u = await _users.FindByIdAsync(userId);
             if (u is null) return null;
             var roles = await _users.GetRolesAsync(userId);
-            return new { u.Id, u.Email, u.DisplayName, u.UserType, u.LastLogin, Roles = roles };
+            var personnelEmail = await _users.GetPersonnelEmailAsync(userId);
+
+            // Mismo cálculo que RolePermissionsController.GetEffectivePermissions — se duplica
+            // aquí en vez de llamarse a sí mismo por HTTP (evita una vuelta de red innecesaria
+            // ya que ambos corren en el mismo proceso/DbContext).
+            var actionPermissions = await (
+                from ur in _context.Roles
+                where roles.Contains(ur.Name) && ur.IsActive && !ur.IsDeleted
+                join rp in _context.RolePermissions on ur.Id equals rp.RoleId
+                join p in _context.Permissions on rp.PermissionId equals p.Id
+                where !p.IsDeleted
+                select (p.Module + "." + p.Action).ToUpper()
+            ).Distinct().ToListAsync();
+
+            // Informativo únicamente: nombres de AccessProfile asignados al usuario. La
+            // autorización real ya quedó expandida a UserRole al momento de asignar el perfil
+            // (ver IAccessProfileAssignmentService) — esto no se usa para calcular permisos.
+            var profiles = await (
+                from uap in _context.UserAccessProfiles
+                where uap.UserId == userId && !uap.IsDeleted
+                join ap in _context.AccessProfiles on uap.AccessProfileId equals ap.Id
+                where ap.IsActive && !ap.IsDeleted
+                select ap.Name
+            ).Distinct().ToListAsync();
+
+            return new
+            {
+                u.Id,
+                u.Email,
+                PersonnelEmail = personnelEmail,
+                u.DisplayName,
+                u.UserType,
+                u.LastLogin,
+                Roles = roles,
+                ActionPermissions = actionPermissions,
+                Profiles = profiles
+            };
         }
 
         public async Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId)

@@ -9,7 +9,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/role-menu-items"), Authorize]
+[ApiController, Route("api/role-menu-items"), Authorize(Roles = "Administrador,R_DITIC")]
 public class RoleMenuItemsController : ControllerBase
 {
     private readonly ICrudService<RoleMenuItem, CreateRoleMenuItemDto, UpdateRoleMenuItemDto> _svc;

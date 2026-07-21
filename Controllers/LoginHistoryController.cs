@@ -7,7 +7,10 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/login-history"), Authorize]
+// Solo lectura: LoginHistory se escribe internamente (AuthRepository.InsertLoginAsync,
+// llamado 7 veces desde AuthService en cada intento de login) — ningún flujo legítimo pasa
+// por este controller. Los registros no se pueden alterar vía API, solo consultar.
+[ApiController, Route("api/login-history"), Authorize(Roles = "Administrador,R_DITIC")]
 public class LoginHistoryController : ControllerBase
 {
     private readonly ICrudService<LoginHistory, CreateLoginHistoryDto, UpdateLoginHistoryDto> _svc;
@@ -19,10 +22,4 @@ public class LoginHistoryController : ControllerBase
     [HttpGet("{id:long}")]
     public async Task<IActionResult> Get(long id)
         => (await _svc.GetAsync(id)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
-    [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateLoginHistoryDto dto)
-        => Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
-    [HttpPut("{id:long}")]
-    public async Task<IActionResult> Update(long id, [FromBody] UpdateLoginHistoryDto dto)
-        => (await _svc.UpdateAsync(id, dto)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
 }

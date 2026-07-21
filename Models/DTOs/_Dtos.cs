@@ -4,11 +4,18 @@ public record ApiResponse(bool Success, object? Data, string? Message, IEnumerab
 { public static ApiResponse Ok(object? data=null, string? message=null) => new(true, data, message, null, DateTime.Now);
   public static ApiResponse Fail(string message, IEnumerable<string>? errors=null) => new(false, null, message, errors, DateTime.Now); }
 
-public record AzureAuthUrlRequest(string? ClientId = null, string? BrowserId = null);
+public record AzureAuthUrlRequest(string? ClientId = null, string? BrowserId = null, string? CodeChallenge = null);
 
 public record LoginRequest(string Email, string Password);
 public record RefreshRequest(string RefreshToken);
 public record TokenPair(string AccessToken, string RefreshToken);
+
+/// <summary>
+/// Intercambio PKCE (RFC 7636): canjea un deliveryCode de un solo uso por el par de
+/// tokens real, demostrando posesión del codeVerifier que nunca salió de la pestaña
+/// que inició el login con Office 365.
+/// </summary>
+public record AzureExchangeRequest(string DeliveryCode, string CodeVerifier);
 
 // Users
 public record CreateUserDto(string Email, string? DisplayName, string UserType = "Local");
@@ -51,8 +58,19 @@ public record CreateRolePermissionDto(int RoleId, int PermissionId, string? Gran
 public record UpdateRolePermissionDto(string? GrantedBy);
 
 // UserRoles (link)
-public record CreateUserRoleDto(Guid UserId, int RoleId, DateTime? ExpiresAt, string? AssignedBy, string? Reason);
+public record CreateUserRoleDto(Guid UserId, int RoleId, DateTime? ExpiresAt, string? AssignedBy, string? Reason, string? AssignedVia = null);
 public record UpdateUserRoleDto(DateTime? ExpiresAt, bool? IsDeleted, string? Reason);
+
+// AccessProfiles (agrupan roles reutilizables, ver AccessProfile)
+public record CreateAccessProfileDto(string Name, string? Description);
+public record UpdateAccessProfileDto(string? Description, bool? IsActive);
+
+// AccessProfileRoles (link: qué roles componen un perfil)
+public record CreateAccessProfileRoleDto(int AccessProfileId, int RoleId);
+public record UpdateAccessProfileRoleDto();
+
+// Asignación de un AccessProfile a un usuario (cascada a UserRole vía IAccessProfileAssignmentService)
+public record AssignAccessProfileDto(Guid UserId, int AccessProfileId, string? AssignedBy);
 
 // MenuItems
 public record CreateMenuItemDto(int? ParentId, string Name, string? Url, string? Icon, int Order, string? ModuleName, bool? IsVisible);

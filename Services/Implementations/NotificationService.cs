@@ -96,7 +96,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 .ToListAsync();
         }
 
-        public async Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair, string browserId)
+        public async Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair, string browserId, string? deliveryCode = null)
         {
             try
             {
@@ -116,7 +116,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 if (!subscriptions.Any())
                     return;
 
-                var eventData = await PrepareLoginEventData(userId, loginType, ipAddress, clientId, pair);
+                var eventData = await PrepareLoginEventData(userId, loginType, ipAddress, clientId, pair, deliveryCode);
                 if (eventData == null) return;
 
                 foreach (var subscription in subscriptions)
@@ -245,7 +245,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             return Task.CompletedTask;
         }
 
-        private async Task<object?> PrepareLoginEventData(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair)
+        private async Task<object?> PrepareLoginEventData(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair, string? deliveryCode = null)
         {
             try
             {
@@ -276,7 +276,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                         roles,
                         permissions
                     },
-                    pair
+                    // PKCE: cuando hay deliveryCode, el par de tokens real NO viaja en este
+                    // mensaje (ni por WebSocket ni por webhook) — solo la referencia de un
+                    // solo uso, canjeable en POST /api/auth/azure/exchange.
+                    pair = deliveryCode is null ? pair : null,
+                    deliveryCode
                 };
             }
             catch (Exception ex)

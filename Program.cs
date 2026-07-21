@@ -289,6 +289,7 @@ builder.Services.AddScoped(typeof(ICrudService<,,>), typeof(CrudService<,,>));
 // Servicios específicos que sobreescriben el CrudService genérico para agregar lógica de negocio
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICrudService<UserRole, CreateUserRoleDto, UpdateUserRoleDto>, UserRoleService>();
+builder.Services.AddScoped<IAccessProfileAssignmentService, AccessProfileAssignmentService>();
 
 builder.Services.AddSingleton<WsSeguUta.AuthSystem.API.Security.JwtTokenService>();
 
@@ -319,8 +320,23 @@ builder.Services.Configure<ForwardedHeadersOptions>(opts =>
 // =========================================================
 var app = builder.Build();
 
+// ✅ CRÍTICO: manejador global de errores PRIMERO, para envolver también
+// CORS, rate limiter, authentication y authorization. Una excepción en esas capas
+// responde con el JSON controlado en vez del 500 crudo del host (que puede filtrar
+// stack traces). Mismo orden que usa HrBackend.
+app.UseMiddleware<ErrorHandlerMiddleware>();
+
 // Intercepta OPTIONS preflights ANTES de routing porque SignalR negotiate solo registra POST
 // y UseCors() con RequireCors() no agrega headers cuando no hay endpoint match para OPTIONS.
+// Los métodos/headers permitidos salen de la MISMA config (Cors:AllowedMethods/AllowedHeaders)
+// que alimenta AddCors, para que ambas rutas no se desincronicen al agregar valores nuevos.
+var preflightMethods = allowedMethods is { Length: > 0 }
+    ? string.Join(", ", allowedMethods)
+    : "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+var preflightHeaders = allowedHeaders is { Length: > 0 }
+    ? string.Join(", ", allowedHeaders)
+    : "content-type, authorization, x-requested-with, x-signalr-user-agent";
+
 app.Use(async (context, next) =>
 {
     if (context.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
@@ -331,8 +347,8 @@ app.Use(async (context, next) =>
             context.Response.StatusCode = 204;
             context.Response.Headers["Access-Control-Allow-Origin"] = origin;
             context.Response.Headers["Access-Control-Allow-Credentials"] = "true";
-            context.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
-            context.Response.Headers["Access-Control-Allow-Headers"] = "content-type, authorization, x-requested-with, x-signalr-user-agent";
+            context.Response.Headers["Access-Control-Allow-Methods"] = preflightMethods;
+            context.Response.Headers["Access-Control-Allow-Headers"] = preflightHeaders;
             context.Response.Headers["Access-Control-Max-Age"] = "86400";
             context.Response.Headers["Vary"] = "Origin";
             return;
@@ -353,8 +369,6 @@ app.UseCors(corsName);
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
-
-app.UseMiddleware<ErrorHandlerMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {

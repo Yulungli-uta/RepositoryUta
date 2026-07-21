@@ -9,7 +9,7 @@ namespace WsSeguUta.AuthSystem.API.Controllers;
 
 [ApiController]
 [Route("api/azure-management")]
-[Authorize(Roles = "Administrador")] // Solo administradores pueden gestionar Azure AD
+[Authorize(Roles = "Administrador,R_DITIC")] // Administrador o rol técnico DITIC pueden gestionar Azure AD
 public class AzureManagementController : ControllerBase
 {
     private readonly IAzureManagementService _azureMgmt;

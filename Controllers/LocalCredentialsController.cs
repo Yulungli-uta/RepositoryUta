@@ -7,7 +7,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/local-credentials"), Authorize]
+[ApiController, Route("api/local-credentials"), Authorize(Roles = "Administrador,R_DITIC")]
 public class LocalCredentialsController : ControllerBase
 {
     private readonly ICrudService<LocalUserCredential, CreateLocalCredentialDto, UpdateLocalCredentialDto> _svc;

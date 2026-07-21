@@ -45,8 +45,13 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 }
 
                 var tokenId = Guid.NewGuid();
-                var expiresAt = DateTime.Now.AddMinutes(60);
-                var token = _tokenService.Create(tokenId, app.ClientId, new[] { "Application" });
+                // Vida fija de 60 min para tokens app-a-app (client credentials), independiente
+                // del parámetro Jwt:AccessTokenLifetimeMinutes de auth.tbl_AppParams (ese es
+                // solo para tokens de usuario). Se pasa explícitamente para que el claim `exp`
+                // real del JWT coincida siempre con el expiresAt devuelto al llamador.
+                var appTokenLifetime = TimeSpan.FromMinutes(60);
+                var expiresAt = DateTime.Now.Add(appTokenLifetime);
+                var token = await _tokenService.CreateAsync(tokenId, app.ClientId, new[] { "Application" }, lifetime: appTokenLifetime);
 
                 app.LastUsedAt = DateTime.Now;
 

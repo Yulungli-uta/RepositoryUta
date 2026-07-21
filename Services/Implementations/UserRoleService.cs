@@ -57,11 +57,12 @@ public class UserRoleService : ICrudService<UserRole, CreateUserRoleDto, UpdateU
             if (isActive)
                 throw new InvalidOperationException("El usuario ya tiene este rol asignado.");
 
-            existing.IsDeleted  = false;
-            existing.AssignedAt = now;
-            existing.ExpiresAt  = dto.ExpiresAt;
-            existing.AssignedBy = dto.AssignedBy ?? GetCurrentUserEmail();
-            existing.Reason     = dto.Reason;
+            existing.IsDeleted   = false;
+            existing.AssignedAt  = now;
+            existing.ExpiresAt   = dto.ExpiresAt;
+            existing.AssignedBy  = dto.AssignedBy ?? GetCurrentUserEmail();
+            existing.Reason      = dto.Reason;
+            existing.AssignedVia = dto.AssignedVia;
             var reactivated = await _userRoleRepo.UpdateAsync(existing);
 
             await _historyRepo.AddAsync(new RoleChangeHistory
@@ -124,7 +125,7 @@ public class UserRoleService : ICrudService<UserRole, CreateUserRoleDto, UpdateU
         {
             UserId           = existing.UserId,
             RoleId           = existing.RoleId,
-            ChangeType       = "Removed",
+            ChangeType       = "Revoked",
             ChangedBy        = GetCurrentUserEmail(),
             PreviousValue    = existing.RoleId.ToString(),
             EffectiveFrom    = DateTime.Now,

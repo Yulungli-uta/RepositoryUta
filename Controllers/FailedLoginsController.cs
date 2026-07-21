@@ -7,7 +7,10 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/failed-logins"), Authorize]
+// Solo lectura: FailedLoginAttempt se escribe internamente (AuthRepository.RecordFailedAttemptAsync,
+// llamado desde AuthService en cada intento fallido). Sin Delete vía API a propósito — es
+// evidencia de fuerza bruta, no debe poder borrarse desde ningún cliente.
+[ApiController, Route("api/failed-logins"), Authorize(Roles = "Administrador,R_DITIC")]
 public class FailedLoginsController : ControllerBase
 {
     private readonly ICrudService<FailedLoginAttempt, CreateFailedAttemptDto, UpdateFailedAttemptDto> _svc;
@@ -19,10 +22,4 @@ public class FailedLoginsController : ControllerBase
     [HttpGet("{id:long}")]
     public async Task<IActionResult> Get(long id)
         => (await _svc.GetAsync(id)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
-    [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateFailedAttemptDto dto)
-        => Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
-    [HttpDelete("{id:long}")]
-    public async Task<IActionResult> Delete(long id)
-        => (await _svc.DeleteAsync(id)) ? Ok(ApiResponse.Ok(message: "Eliminado")) : NotFound(ApiResponse.Fail("No existe"));
 }

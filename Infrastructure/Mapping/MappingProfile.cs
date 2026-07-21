@@ -73,6 +73,13 @@ namespace WsSeguUta.AuthSystem.API.Infrastructure.Mapping
       CreateMap<UpdateAzureSyncLogDto, AzureSyncLog>();
       CreateMap<CreateHRSyncLogDto, HRSyncLog>();
       CreateMap<UpdateHRSyncLogDto, HRSyncLog>();
+
+      CreateMap<CreateAccessProfileDto, AccessProfile>();
+      CreateMap<UpdateAccessProfileDto, AccessProfile>()
+        .ForAllMembers(opt => opt.Condition((src, dest, value) => value != null));
+
+      CreateMap<CreateAccessProfileRoleDto, AccessProfileRole>();
+      CreateMap<UpdateAccessProfileRoleDto, AccessProfileRole>();
     }
   }
 }

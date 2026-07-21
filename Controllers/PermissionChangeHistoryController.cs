@@ -7,7 +7,10 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/permission-change-history"), Authorize]
+// Solo lectura: hoy ningún flujo del sistema escribe PermissionChangeHistory (tabla no
+// alimentada por RolePermissionsController/PermissionsController). Se deja como catálogo
+// de solo consulta, sin mutación vía API, para el día que se cablee esa escritura.
+[ApiController, Route("api/permission-change-history"), Authorize(Roles = "Administrador,R_DITIC")]
 public class PermissionChangeHistoryController : ControllerBase
 {
     private readonly ICrudService<PermissionChangeHistory, CreatePermissionChangeHistoryDto, UpdatePermissionChangeHistoryDto> _svc;
@@ -19,10 +22,4 @@ public class PermissionChangeHistoryController : ControllerBase
     [HttpGet("{id:long}")]
     public async Task<IActionResult> Get(long id)
         => (await _svc.GetAsync(id)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
-    [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreatePermissionChangeHistoryDto dto)
-        => Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
-    [HttpPut("{id:long}")]
-    public async Task<IActionResult> Update(long id, [FromBody] UpdatePermissionChangeHistoryDto dto)
-        => (await _svc.UpdateAsync(id, dto)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
 }

@@ -8,8 +8,7 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 
-[ApiController, Route("api/local-ad"), Authorize]
-//[Authorize(Roles = "Administrador")]
+[ApiController, Route("api/local-ad"), Authorize(Roles = "Administrador,R_DITIC")]
 public class LocalAdController : ControllerBase
 {
     private readonly IIdentityProviderResolver _resolver;

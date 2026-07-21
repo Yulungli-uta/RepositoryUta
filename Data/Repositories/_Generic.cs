@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using System.Linq.Expressions;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
+using WsSeguUta.AuthSystem.API.Models.Entities;
 
 namespace WsSeguUta.AuthSystem.API.Data.Repositories
 {
@@ -96,7 +97,17 @@ namespace WsSeguUta.AuthSystem.API.Data.Repositories
         {
             var e = await _set.FindAsync(key);
             if (e == null) return false;
-            _set.Remove(e);
+
+            if (e is ISoftDeletable softDeletable)
+            {
+                softDeletable.IsDeleted = true;
+                _set.Update(e);
+            }
+            else
+            {
+                _set.Remove(e);
+            }
+
             await _db.SaveChangesAsync();
             return true;
         }

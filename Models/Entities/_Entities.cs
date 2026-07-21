@@ -1,17 +1,17 @@
 ﻿namespace WsSeguUta.AuthSystem.API.Models.Entities;
 
-public class User { public Guid Id { get; set; } public string Email { get; set; } = string.Empty; public string? DisplayName { get; set; } public Guid? AzureObjectId { get; set; } public bool IsActive { get; set; } = true; public DateTime CreatedAt { get; set; } = DateTime.Now; public DateTime? LastLogin { get; set; } public string UserType { get; set; } = "AzureAD"; }
+public class User : ISoftDeletable { public Guid Id { get; set; } public string Email { get; set; } = string.Empty; public string? DisplayName { get; set; } public Guid? AzureObjectId { get; set; } public bool IsActive { get; set; } = true; public DateTime CreatedAt { get; set; } = DateTime.Now; public DateTime? LastLogin { get; set; } public string UserType { get; set; } = "AzureAD"; public bool IsDeleted { get; set; } = false; }
 public class UserEmployee { public int Id { get; set; } public Guid UserId { get; set; } public string EmployeeEmail { get; set; } = string.Empty; public int? HrEmployeeId { get; set; } public bool IsActive { get; set; } = true; public DateTime? SyncDate { get; set; } public string? Notes { get; set; } }
 public class AppParam { public string Nemonic { get; set; } = string.Empty; public string Value { get; set; } = string.Empty; public string DataType { get; set; } = "string"; public string Category { get; set; } = "General"; public string? Description { get; set; } public bool IsEncrypted { get; set; } = false; public DateTime LastModified { get; set; } = DateTime.Now; public string? ModifiedBy { get; set; } }
 public class LocalUserCredential { public Guid UserId { get; set; } public string PasswordHash { get; set; } = string.Empty; public DateTime PasswordCreatedAt { get; set; } = DateTime.Now; public DateTime? PasswordExpiresAt { get; set; } public bool MustChangePassword { get; set; } = false; public int FailedAttempts { get; set; } = 0; public DateTime? LastFailedAttempt { get; set; } public DateTime? LockedUntil { get; set; } public bool IsLocked { get; set; } = false; public bool TwoFactorEnabled { get; set; } = false; public string? TwoFactorSecret { get; set; } public string? SecurityQuestions { get; set; } }
 public class SecurityToken { public Guid Id { get; set; } = Guid.NewGuid(); public Guid UserId { get; set; } public string TokenType { get; set; } = "PasswordReset"; public string TokenHash { get; set; } = string.Empty; public DateTime ExpiresAt { get; set; } public bool IsUsed { get; set; } = false; public DateTime CreatedAt { get; set; } = DateTime.Now; public string? AdditionalData { get; set; } }
 public class PasswordHistory { public long Id { get; set; } public Guid UserId { get; set; } public string PasswordHash { get; set; } = string.Empty; public DateTime CreatedAt { get; set; } = DateTime.Now; }
 public class UserAccountLock { public long Id { get; set; } public Guid UserId { get; set; } public string LockType { get; set; } = "FailedAttempts"; public string LockReason { get; set; } = string.Empty; public DateTime LockedAt { get; set; } = DateTime.Now; public string? LockedBy { get; set; } public DateTime? AutoUnlockAt { get; set; } public DateTime? UnlockedAt { get; set; } public string? UnlockedBy { get; set; } public bool IsActive { get; set; } = true; }
-public class Role { public int Id { get; set; } public string Name { get; set; } = string.Empty; public string? Description { get; set; } public bool IsActive { get; set; } = true; public int Priority { get; set; } = 100; public DateTime CreatedAt { get; set; } = DateTime.Now; public bool IsDeleted { get; set; } = false; }
-public class Permission { public int Id { get; set; } public string Name { get; set; } = string.Empty; public string Module { get; set; } = string.Empty; public string Action { get; set; } = "Read"; public string? Description { get; set; } public int Version { get; set; } = 1; public bool IsDeleted { get; set; } = false; }
+public class Role : ISoftDeletable { public int Id { get; set; } public string Name { get; set; } = string.Empty; public string? Description { get; set; } public bool IsActive { get; set; } = true; public int Priority { get; set; } = 100; public DateTime CreatedAt { get; set; } = DateTime.Now; public bool IsDeleted { get; set; } = false; }
+public class Permission : ISoftDeletable { public int Id { get; set; } public string Name { get; set; } = string.Empty; public string Module { get; set; } = string.Empty; public string Action { get; set; } = "Read"; public string? Description { get; set; } public int Version { get; set; } = 1; public bool IsDeleted { get; set; } = false; }
 public class RolePermission { public int RoleId { get; set; } public int PermissionId { get; set; } public DateTime GrantedAt { get; set; } = DateTime.Now; public string? GrantedBy { get; set; } }
-public class UserRole { public Guid UserId { get; set; } public int RoleId { get; set; } public DateTime AssignedAt { get; set; } = DateTime.Now; public DateTime? ExpiresAt { get; set; } public string? AssignedBy { get; set; } public string? Reason { get; set; } public bool IsDeleted { get; set; } = false; }
-public class MenuItem { public int Id { get; set; } public string Name { get; set; } = string.Empty; public string? Url { get; set; } public string? Icon { get; set; } public int? ParentId { get; set; } public int Order { get; set; } = 0; public bool IsVisible { get; set; } = true; public string? ModuleName { get; set; } public bool IsDeleted { get; set; } = false; }
+public class UserRole { public Guid UserId { get; set; } public int RoleId { get; set; } public DateTime AssignedAt { get; set; } = DateTime.Now; public DateTime? ExpiresAt { get; set; } public string? AssignedBy { get; set; } public string? Reason { get; set; } public bool IsDeleted { get; set; } = false; /* Origen de la asignación: null/"Direct" = directo, "Profile:{AccessProfileId}" = heredado de un perfil de acceso. */ public string? AssignedVia { get; set; } }
+public class MenuItem : ISoftDeletable { public int Id { get; set; } public string Name { get; set; } = string.Empty; public string? Url { get; set; } public string? Icon { get; set; } public int? ParentId { get; set; } public int Order { get; set; } = 0; public bool IsVisible { get; set; } = true; public string? ModuleName { get; set; } public bool IsDeleted { get; set; } = false; }
 public class RoleMenuItem { public int RoleId { get; set; } public int MenuItemId { get; set; } public bool IsVisible { get; set; } = true; }
 public class UserSession { public Guid SessionId { get; set; } = Guid.NewGuid(); public Guid UserId { get; set; } public string AccessToken { get; set; } = string.Empty; public string RefreshToken { get; set; } = string.Empty; public DateTime ExpiresAt { get; set; } public bool IsActive { get; set; } = true; public string? DeviceInfo { get; set; } public string? IpAddress { get; set; } public DateTime CreatedAt { get; set; } = DateTime.Now; public string Status { get; set; } = "Active"; public string? BrowserId { get; set; } public string? UserAgent { get; set; } public DateTime? LastActivityAt { get; set; } public DateTime? RevokedAt { get; set; } public string? RevokedBy { get; set; } }
 public class FailedLoginAttempt { public long Id { get; set; } public string UserEmail { get; set; } = string.Empty; public DateTime AttemptedAt { get; set; } = DateTime.Now; public string? IpAddress { get; set; } public string? UserAgent { get; set; } public string? Reason { get; set; } public DateTime? WindowBucket { get; set; } }
@@ -210,6 +210,46 @@ public class UserProvisioning
 
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime? UpdatedAt { get; set; }
+}
+
+// ========== PERFILES DE ACCESO (agrupan roles reutilizables) ==========
+
+/// <summary>
+/// Agrupa uno o varios Roles bajo un nombre reutilizable (ej. "Directora Administrativa" =
+/// Jefe de Departamento + Empleado + Aprobador de Guardias). Asignar un perfil a un usuario
+/// expande la asignación a filas concretas en UserRole (ver IAccessProfileAssignmentService);
+/// el perfil NO participa en la resolución de menú ni de permisos — esos siempre se calculan
+/// a partir de los roles efectivos del usuario.
+/// </summary>
+public class AccessProfile
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public bool IsDeleted { get; set; } = false;
+}
+
+/// <summary>Composición de un AccessProfile: qué roles agrupa.</summary>
+public class AccessProfileRole
+{
+    public int AccessProfileId { get; set; }
+    public int RoleId { get; set; }
+}
+
+/// <summary>
+/// Registro de qué perfiles tiene asignado un usuario. Es informativo/de trazabilidad
+/// (para mostrar "Perfil: Directora Administrativa" en UI y para poder revertir la
+/// asignación de forma segura) — la autorización real siempre pasa por UserRole.
+/// </summary>
+public class UserAccessProfile
+{
+    public Guid UserId { get; set; }
+    public int AccessProfileId { get; set; }
+    public DateTime AssignedAt { get; set; } = DateTime.Now;
+    public string? AssignedBy { get; set; }
+    public bool IsDeleted { get; set; } = false;
 }
 
 
