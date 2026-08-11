@@ -73,6 +73,33 @@ namespace WsSeguUta.AuthSystem.API.Security
         }
 
         /// <summary>
+        /// Token de aplicacion (client_credentials, app-a-app). Distinto de <see cref="CreateAsync(Guid,string,IEnumerable{string},TimeSpan?,int?,CancellationToken)"/>:
+        /// no lleva claims de usuario (email/NameIdentifier), lleva "client_id" para que
+        /// el validador lo identifique como token de aplicacion y lo resuelva contra
+        /// auth.tbl_Applications en vez de auth.tbl_Users.
+        /// </summary>
+        public Task<string> CreateAppTokenAsync(Guid tokenId, string clientId, IEnumerable<string> roles, TimeSpan lifetime, CancellationToken ct = default)
+        {
+            var claims = new List<Claim>
+            {
+                new(JwtRegisteredClaimNames.Sub, tokenId.ToString()),
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new("client_id", clientId),
+                new("token_use", "app")
+            };
+            claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
+
+            var token = new JwtSecurityToken(
+                _issuer,
+                _audience,
+                claims,
+                expires: DateTime.Now.Add(lifetime),
+                signingCredentials: new SigningCredentials(_keys.SigningKey, SecurityAlgorithms.RsaSha256));
+
+            return Task.FromResult(new JwtSecurityTokenHandler().WriteToken(token));
+        }
+
+        /// <summary>
         /// Lee auth.tbl_AppParams['Jwt:AccessTokenLifetimeMinutes'] (gestionable solo por
         /// Administrador/R_DITIC vía AppParamsController) con caché de 5 min para no pegarle
         /// a la BD en cada login/refresh. Si la fila no existe o la BD falla, cae a

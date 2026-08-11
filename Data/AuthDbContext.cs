@@ -96,6 +96,15 @@ public class AuthDbContext : DbContext
                 tb.UseSqlOutputClause(false);                    // desactiva OUTPUT para esta tabla
             });
         });
+
+        // Nunca tuvo Configuration propia: EF usaba el nombre por convención
+        // (dbo.LegacyAuthLogs), que no existe. La tabla real es auth.tbl_LegacyAuthLog,
+        // y no tiene columna AuthType (se ignora esa propiedad).
+        modelBuilder.Entity<LegacyAuthLog>(e =>
+        {
+            e.ToTable("tbl_LegacyAuthLog", "auth");
+            e.Ignore(x => x.AuthType);
+        });
         
         // Configuración de vistas SQL
         modelBuilder.Entity<VwUserRole>().HasNoKey().ToView("vw_UserRoles", "auth");

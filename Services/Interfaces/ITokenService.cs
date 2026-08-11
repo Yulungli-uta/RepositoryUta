@@ -4,6 +4,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
     {
         Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, int? hrEmployeeId = null, TimeSpan? lifetime = null, CancellationToken ct = default);
         Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, int? hrEmployeeId = null, TimeSpan? lifetime = null, CancellationToken ct = default);
+        Task<string> CreateAppTokenAsync(Guid tokenId, string clientId, IEnumerable<string> roles, TimeSpan lifetime, CancellationToken ct = default);
         string Hash(string input);
     }
 }

@@ -16,13 +16,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly ITokenService _tokenService;
         private readonly ILogger<AppAuthService> _logger;
         private readonly IMemoryCache _cache;
+        private readonly IConfiguration _configuration;
 
-        public AppAuthService(AuthDbContext context, ITokenService tokenService, ILogger<AppAuthService> logger, IMemoryCache cache)
+        public AppAuthService(AuthDbContext context, ITokenService tokenService, ILogger<AppAuthService> logger, IMemoryCache cache, IConfiguration configuration)
         {
             _context = context;
             _tokenService = tokenService;
             _logger = logger;
             _cache = cache;
+            _configuration = configuration;
         }
 
         public async Task<AppAuthResponse> AuthenticateApplicationAsync(string clientId, string clientSecret, string? ipAddress, string? userAgent)
@@ -35,13 +37,13 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 if (app == null)
                 {
                     _logger.LogWarning("Aplicación no encontrada o inactiva: {ClientId}", clientId);
-                    return new AppAuthResponse(false, "Invalid client credentials", null, null, null);
+                    return new AppAuthResponse(false, "Invalid client credentials", null, null, null, null);
                 }
 
                 if (!SecretMatches(app.ClientSecretHash, _tokenService.Hash(clientSecret)))
                 {
                     _logger.LogWarning("Secret inválido para aplicación: {ClientId}", clientId);
-                    return new AppAuthResponse(false, "Invalid client credentials", null, null, null);
+                    return new AppAuthResponse(false, "Invalid client credentials", null, null, null, null);
                 }
 
                 var tokenId = Guid.NewGuid();
@@ -51,7 +53,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 // real del JWT coincida siempre con el expiresAt devuelto al llamador.
                 var appTokenLifetime = TimeSpan.FromMinutes(60);
                 var expiresAt = DateTime.Now.Add(appTokenLifetime);
-                var token = await _tokenService.CreateAsync(tokenId, app.ClientId, new[] { "Application" }, lifetime: appTokenLifetime);
+                var configuredRoles = _configuration.GetSection($"AppAuth:ClientRoles:{app.ClientId}").Get<string[]>();
+                var tokenRoles = configuredRoles is { Length: > 0 } ? configuredRoles : new[] { "Application" };
+                var token = await _tokenService.CreateAppTokenAsync(tokenId, app.ClientId, tokenRoles, appTokenLifetime);
 
                 app.LastUsedAt = DateTime.Now;
 
@@ -68,12 +72,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 await _context.SaveChangesAsync();
 
                 _logger.LogInformation("Token de aplicación creado para: {ClientId}", clientId);
-                return new AppAuthResponse(true, "Authentication successful", tokenId, expiresAt, app.Id);
+                return new AppAuthResponse(true, "Authentication successful", token, tokenId, expiresAt, app.Id);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error autenticando aplicación: {ClientId}", clientId);
-                return new AppAuthResponse(false, "Internal server error", null, null, null);
+                return new AppAuthResponse(false, "Internal server error", null, null, null, null);
             }
         }
 

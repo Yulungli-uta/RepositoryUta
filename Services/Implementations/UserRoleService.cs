@@ -1,5 +1,5 @@
 using System.Security.Claims;
-using AutoMapper;
+using MapsterMapper;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using WsSeguUta.AuthSystem.API.Data.Repositories;

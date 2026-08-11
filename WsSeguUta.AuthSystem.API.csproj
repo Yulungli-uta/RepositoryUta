@@ -31,33 +31,31 @@
     <!-- Pines explícitos: forzar una única versión de la familia IdentityModel para todo el árbol de dependencias
          (Auth0.AspNetCore.Authentication arrastraba Microsoft.IdentityModel.Validators 8.6.1, desalineado con
          System.IdentityModel.Tokens.Jwt 8.12.1 resuelto por el resto del árbol, causando FileNotFoundException en runtime) -->
-    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.12.1" />
-    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.12.1" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.12.1" />
-    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.12.1" />
-    <PackageReference Include="Microsoft.IdentityModel.Validators" Version="8.12.1" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.21.0" />
+    <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.21.0" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.21.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.21.0" />
+    <PackageReference Include="Microsoft.IdentityModel.Validators" Version="8.21.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Graph" Version="5.99.0" />
+    <PackageReference Include="Microsoft.Graph" Version="6.2.0" />
     <PackageReference Include="Microsoft.Identity.Client" Version="4.61.3" />
     <PackageReference Include="Azure.Identity" Version="1.12.0" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
     <!--<PackageReference Include="FluentValidation.AspNetCore" Version="11.8.0" />-->
 	<PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
-    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
-    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.19.1" />
-    <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.19.1" />
+    <PackageReference Include="Mapster" Version="10.0.11" />
+    <PackageReference Include="Mapster.DependencyInjection" Version="10.0.11" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.1" />
     <PackageReference Include="Serilog.Sinks.Console" Version="5.0.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
     <!--<PackageReference Include="Otp.NET" Version="2.0.4" />-->
 	<PackageReference Include="Otp.NET" Version="1.4.0" />
-	<PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.19.1" />
 	  <PackageReference Include="Auth0.ManagementApi" Version="7.40.0" />
 	  <PackageReference Include="Auth0.AuthenticationApi" Version="7.26.2" />
 	  <PackageReference Include="Auth0.AspNetCore.Authentication" Version="1.5.0" />

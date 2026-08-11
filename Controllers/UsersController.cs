@@ -51,6 +51,15 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateUserDto dto)
     {
+        // Sin esto, este endpoint (crea User + UserEmployee en un solo paso) dejaba el
+        // vinculo con HrEmployeeId en NULL en silencio — mismo bug que ya se habia corregido
+        // en UserEmployeesController.Create, pero en un endpoint distinto.
+        // Solo se exige para AzureAD (empleados reales): las cuentas "Local" son
+        // administrativas/de servicio y no siempre corresponden a un empleado de HR — el
+        // propio formulario ya las trata distinto (no muestra selector de empleado para ellas).
+        if (dto.UserType == "AzureAD" && dto.HrEmployeeId <= 0)
+            return BadRequest(ApiResponse.Fail("HrEmployeeId es obligatorio y debe ser un identificador de empleado valido."));
+
         try
         {
             var result = await _userRegistrationService.CreateUserWithEmployeeAsync(dto);

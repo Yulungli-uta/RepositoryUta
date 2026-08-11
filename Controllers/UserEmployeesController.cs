@@ -21,7 +21,14 @@ public class UserEmployeesController : ControllerBase
         => (await _svc.GetAsync(id)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateUserEmployeeDto dto)
-        => Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
+    {
+        // Sin esto, un vinculo creado desde el panel manual quedaba con HrEmployeeId en 0/NULL
+        // (el DTO antes ni siquiera tenia el campo) — el usuario nunca recibia employeeId en su
+        // sesion y cualquier flujo que dependiera de eso fallaba en silencio.
+        if (dto.HrEmployeeId <= 0)
+            return BadRequest(ApiResponse.Fail("HrEmployeeId es obligatorio y debe ser un identificador de empleado valido."));
+        return Ok(ApiResponse.Ok(await _svc.CreateAsync(dto)));
+    }
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateUserEmployeeDto dto)
         => (await _svc.UpdateAsync(id, dto)) is { } e ? Ok(ApiResponse.Ok(e)) : NotFound(ApiResponse.Fail("No existe"));

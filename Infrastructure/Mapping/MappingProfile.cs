@@ -1,85 +1,85 @@
-﻿using AutoMapper;
+using Mapster;
 using WsSeguUta.AuthSystem.API.Models.Entities;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 
 namespace WsSeguUta.AuthSystem.API.Infrastructure.Mapping
 {
-  public class MappingProfile : Profile
+  public class MappingProfile : IRegister
   {
-    public MappingProfile()
+    public void Register(TypeAdapterConfig config)
     {
-      CreateMap<CreateUserDto, User>();
+      config.NewConfig<CreateUserDto, User>();
       // Ignorar campos null al actualizar User para evitar pisar valores existentes (e.g. UserType NOT NULL)
-      CreateMap<UpdateUserDto, User>()
-        .ForAllMembers(opt => opt.Condition((src, dest, value) => value != null));
+      config.NewConfig<UpdateUserDto, User>()
+        .IgnoreNullValues(true);
 
-      CreateMap<CreateUserEmployeeDto, UserEmployee>();
-      CreateMap<UpdateUserEmployeeDto, UserEmployee>();
+      config.NewConfig<CreateUserEmployeeDto, UserEmployee>();
+      config.NewConfig<UpdateUserEmployeeDto, UserEmployee>();
 
-      CreateMap<CreateAppParamDto, AppParam>();
-      CreateMap<UpdateAppParamDto, AppParam>();
+      config.NewConfig<CreateAppParamDto, AppParam>();
+      config.NewConfig<UpdateAppParamDto, AppParam>();
 
-      CreateMap<CreateLocalCredentialDto, LocalUserCredential>();
-      CreateMap<UpdateLocalCredentialDto, LocalUserCredential>();
+      config.NewConfig<CreateLocalCredentialDto, LocalUserCredential>();
+      config.NewConfig<UpdateLocalCredentialDto, LocalUserCredential>();
 
-      CreateMap<CreateSecurityTokenDto, SecurityToken>();
-      CreateMap<UpdateSecurityTokenDto, SecurityToken>();
+      config.NewConfig<CreateSecurityTokenDto, SecurityToken>();
+      config.NewConfig<UpdateSecurityTokenDto, SecurityToken>();
 
-      CreateMap<CreatePasswordHistoryDto, PasswordHistory>();
+      config.NewConfig<CreatePasswordHistoryDto, PasswordHistory>();
 
-      CreateMap<CreateUserAccountLockDto, UserAccountLock>();
-      CreateMap<UpdateUserAccountLockDto, UserAccountLock>();
+      config.NewConfig<CreateUserAccountLockDto, UserAccountLock>();
+      config.NewConfig<UpdateUserAccountLockDto, UserAccountLock>();
 
-      CreateMap<CreateRoleDto, Role>();
-      CreateMap<UpdateRoleDto, Role>();
+      config.NewConfig<CreateRoleDto, Role>();
+      config.NewConfig<UpdateRoleDto, Role>();
 
-      CreateMap<CreatePermissionDto, Permission>();
-      CreateMap<UpdatePermissionDto, Permission>();
+      config.NewConfig<CreatePermissionDto, Permission>();
+      config.NewConfig<UpdatePermissionDto, Permission>();
 
-      CreateMap<CreateRolePermissionDto, RolePermission>();
-      CreateMap<UpdateRolePermissionDto, RolePermission>();
+      config.NewConfig<CreateRolePermissionDto, RolePermission>();
+      config.NewConfig<UpdateRolePermissionDto, RolePermission>();
 
-      CreateMap<CreateUserRoleDto, UserRole>();
-      CreateMap<UpdateUserRoleDto, UserRole>();
+      config.NewConfig<CreateUserRoleDto, UserRole>();
+      config.NewConfig<UpdateUserRoleDto, UserRole>();
 
-      CreateMap<CreateMenuItemDto, MenuItem>();
-      CreateMap<UpdateMenuItemDto, MenuItem>();
+      config.NewConfig<CreateMenuItemDto, MenuItem>();
+      config.NewConfig<UpdateMenuItemDto, MenuItem>();
 
-      CreateMap<CreateRoleMenuItemDto, RoleMenuItem>();
-      CreateMap<UpdateRoleMenuItemDto, RoleMenuItem>();
+      config.NewConfig<CreateRoleMenuItemDto, RoleMenuItem>();
+      config.NewConfig<UpdateRoleMenuItemDto, RoleMenuItem>();
 
-      CreateMap<CreateUserSessionDto, UserSession>();
-      CreateMap<UpdateUserSessionDto, UserSession>();
+      config.NewConfig<CreateUserSessionDto, UserSession>();
+      config.NewConfig<UpdateUserSessionDto, UserSession>();
 
-      CreateMap<CreateFailedAttemptDto, FailedLoginAttempt>();
-      CreateMap<UpdateFailedAttemptDto, FailedLoginAttempt>();
+      config.NewConfig<CreateFailedAttemptDto, FailedLoginAttempt>();
+      config.NewConfig<UpdateFailedAttemptDto, FailedLoginAttempt>();
 
-      CreateMap<CreateAuditLogDto, AuditLog>();
-      CreateMap<UpdateAuditLogDto, AuditLog>();
+      config.NewConfig<CreateAuditLogDto, AuditLog>();
+      config.NewConfig<UpdateAuditLogDto, AuditLog>();
 
-      CreateMap<CreateLoginHistoryDto, LoginHistory>();
-      CreateMap<UpdateLoginHistoryDto, LoginHistory>();
+      config.NewConfig<CreateLoginHistoryDto, LoginHistory>();
+      config.NewConfig<UpdateLoginHistoryDto, LoginHistory>();
 
-      CreateMap<CreateUserActivityLogDto, UserActivityLog>();
-      CreateMap<UpdateUserActivityLogDto, UserActivityLog>();
+      config.NewConfig<CreateUserActivityLogDto, UserActivityLog>();
+      config.NewConfig<UpdateUserActivityLogDto, UserActivityLog>();
 
-      CreateMap<CreateRoleChangeHistoryDto, RoleChangeHistory>();
-      CreateMap<UpdateRoleChangeHistoryDto, RoleChangeHistory>();
+      config.NewConfig<CreateRoleChangeHistoryDto, RoleChangeHistory>();
+      config.NewConfig<UpdateRoleChangeHistoryDto, RoleChangeHistory>();
 
-      CreateMap<CreatePermissionChangeHistoryDto, PermissionChangeHistory>();
-      CreateMap<UpdatePermissionChangeHistoryDto, PermissionChangeHistory>();
+      config.NewConfig<CreatePermissionChangeHistoryDto, PermissionChangeHistory>();
+      config.NewConfig<UpdatePermissionChangeHistoryDto, PermissionChangeHistory>();
 
-      CreateMap<CreateAzureSyncLogDto, AzureSyncLog>();
-      CreateMap<UpdateAzureSyncLogDto, AzureSyncLog>();
-      CreateMap<CreateHRSyncLogDto, HRSyncLog>();
-      CreateMap<UpdateHRSyncLogDto, HRSyncLog>();
+      config.NewConfig<CreateAzureSyncLogDto, AzureSyncLog>();
+      config.NewConfig<UpdateAzureSyncLogDto, AzureSyncLog>();
+      config.NewConfig<CreateHRSyncLogDto, HRSyncLog>();
+      config.NewConfig<UpdateHRSyncLogDto, HRSyncLog>();
 
-      CreateMap<CreateAccessProfileDto, AccessProfile>();
-      CreateMap<UpdateAccessProfileDto, AccessProfile>()
-        .ForAllMembers(opt => opt.Condition((src, dest, value) => value != null));
+      config.NewConfig<CreateAccessProfileDto, AccessProfile>();
+      config.NewConfig<UpdateAccessProfileDto, AccessProfile>()
+        .IgnoreNullValues(true);
 
-      CreateMap<CreateAccessProfileRoleDto, AccessProfileRole>();
-      CreateMap<UpdateAccessProfileRoleDto, AccessProfileRole>();
+      config.NewConfig<CreateAccessProfileRoleDto, AccessProfileRole>();
+      config.NewConfig<UpdateAccessProfileRoleDto, AccessProfileRole>();
     }
   }
 }

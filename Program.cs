@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Mapster;
+using MapsterMapper;
 using Microsoft.Graph;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -67,7 +69,10 @@ builder.Services.AddDbContext<AuthDbContext>(options =>
 // =========================================================
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient();
-builder.Services.AddAutoMapper(typeof(MappingProfile));
+var mapperConfig = new TypeAdapterConfig();
+mapperConfig.Scan(typeof(MappingProfile).Assembly);
+builder.Services.AddSingleton(mapperConfig);
+builder.Services.AddScoped<IMapper, ServiceMapper>();
 builder.Services.AddControllers()
     .ConfigureApiBehaviorOptions(opt =>
     {

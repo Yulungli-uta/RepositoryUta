@@ -265,6 +265,30 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                             }
                         }
 
+                        // Token de aplicacion (client_credentials): el "sub" es un tokenId
+                        // aleatorio, no un usuario real - se identifica por el claim
+                        // "client_id" y se resuelve contra auth.tbl_Applications en vez de
+                        // auth.tbl_Users. Sin esta rama, cualquier token emitido por
+                        // /api/app-auth/token (ej. el que usa signature-api para llamar a
+                        // HrBackend) siempre habria fallado aqui.
+                        var clientIdClaim = principal.FindFirst("client_id")?.Value;
+                        if (!string.IsNullOrWhiteSpace(clientIdClaim))
+                        {
+                            var app = await _context.Applications.AsNoTracking()
+                                .FirstOrDefaultAsync(a => a.ClientId == clientIdClaim && a.IsActive && !a.IsDeleted);
+                            if (app is not null)
+                            {
+                                return new ValidateTokenResponse(
+                                    IsValid: true,
+                                    TokenType: "AppToken",
+                                    ExpiresAt: ((JwtSecurityToken)validatedToken).ValidTo,
+                                    UserId: null,
+                                    SessionId: null,
+                                    Message: "Token is valid",
+                                    Email: app.ClientId);
+                            }
+                        }
+
                         _logger.LogWarning("Validación JWT fallida: usuario no encontrado o inactivo");
                         return new ValidateTokenResponse(false, "Unknown", null, null, null, "User not found or inactive", null);
                     }

@@ -52,6 +52,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 {
                     UserId = user.Id,
                     EmployeeEmail = email,
+                    // Local (cuentas administrativas/de servicio) puede no tener empleado real —
+                    // se deja NULL en vez de 0 para no inventar un valor falso.
+                    HrEmployeeId = dto.HrEmployeeId > 0 ? dto.HrEmployeeId : null,
                     IsActive = true,
                     SyncDate = DateTime.Now,
                     Notes = "Creado manualmente desde el panel de administración"

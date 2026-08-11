@@ -1,3 +1,4 @@
+using System.DirectoryServices.Protocols;
 using System.Net;
 using System.Text.Json;
 
@@ -43,11 +44,23 @@ namespace WsSeguUta.AuthSystem.API.Middleware
         context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
         context.Response.ContentType = "application/json";
 
+        // Errores de LDAP (bind fallido, servidor inalcanzable) son casi siempre un problema
+        // de configuración/credenciales de la cuenta de servicio de AD, no un bug de la app —
+        // se distingue del genérico para que el front pueda mostrar un mensaje accionable en
+        // vez de "Error interno" sin dar pista de qué revisar. El detalle real (errorCode,
+        // servidor, usuario) ya quedó en el log de arriba vía traceId; aquí no se expone.
+        var isAdConfigError = ex is LdapException || ex is DirectoryOperationException;
+
         var body = JsonSerializer.Serialize(new
         {
           success = false,
-          message = "Error interno",
-          errors = new[] { $"Ocurrió un error inesperado. Referencia: {traceId}" },
+          message = isAdConfigError ? "Error de configuración de Active Directory" : "Error interno",
+          errors = new[]
+          {
+            isAdConfigError
+              ? $"No se pudo conectar o autenticar contra Active Directory. Verifique la configuración de la cuenta de servicio. Referencia: {traceId}"
+              : $"Ocurrió un error inesperado. Referencia: {traceId}"
+          },
           traceId,
           timestamp = DateTime.Now
         });

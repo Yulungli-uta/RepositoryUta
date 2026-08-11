@@ -18,11 +18,19 @@ public record TokenPair(string AccessToken, string RefreshToken);
 public record AzureExchangeRequest(string DeliveryCode, string CodeVerifier);
 
 // Users
-public record CreateUserDto(string Email, string? DisplayName, string UserType = "Local");
+// HrEmployeeId es obligatorio por el mismo motivo que en CreateUserEmployeeDto (ver nota abajo):
+// este endpoint crea el User Y su UserEmployee en un solo paso, y antes dejaba ese vinculo
+// sin HrEmployeeId — mismo bug, endpoint distinto (detectado 2026-08-04, cuentas creadas el
+// mismo dia via este panel con HrEmployeeId NULL).
+public record CreateUserDto(string Email, string? DisplayName, int HrEmployeeId, string UserType = "Local");
 public record UpdateUserDto(string? DisplayName, bool? IsActive, Guid? AzureObjectId, string? UserType);
 
 // UserEmployees
-public record CreateUserEmployeeDto(Guid UserId, string EmployeeEmail, bool? IsActive, DateTime? SyncDate, string? Notes);
+// HrEmployeeId es obligatorio: sin el, el usuario queda sin vinculo real a su empleado de
+// HR y ninguna sesion emitida para el lleva employeeId (rompe silenciosamente cualquier
+// flujo que dependa de eso, como la bandeja de firma electronica — confirmado en un caso
+// real donde faltaba este dato tras una vinculacion manual desde el panel).
+public record CreateUserEmployeeDto(Guid UserId, string EmployeeEmail, int HrEmployeeId, bool? IsActive, DateTime? SyncDate, string? Notes);
 public record UpdateUserEmployeeDto(bool? IsActive, DateTime? SyncDate, string? Notes);
 
 // AppParams
@@ -135,7 +143,7 @@ public record ValidateTokenResponse(bool IsValid, string TokenType, DateTime? Ex
 
 // Application Authentication
 public record AppAuthRequest(string ClientId, string ClientSecret);
-public record AppAuthResponse(bool Success, string Message, Guid? TokenId, DateTime? ExpiresAt, Guid? ApplicationId);
+public record AppAuthResponse(bool Success, string Message, string? AccessToken, Guid? TokenId, DateTime? ExpiresAt, Guid? ApplicationId);
 
 // Legacy Auth Log
 public record CreateLegacyAuthLogDto(Guid ApplicationId, Guid? UserId, string UserEmail, string AuthResult, string? FailureReason, string? IpAddress, string? UserAgent, string? RequestData, int? ResponseTime);
