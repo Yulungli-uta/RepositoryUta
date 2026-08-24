@@ -54,7 +54,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         {
             var isAllowed = await _clientApplicationService.IsClientApplicationAllowedAsync(clientId);
             if (!isAllowed)
+            {
+                _logger.LogWarning(
+                    "[AZURE-LOGIN] Rechazado: aplicación cliente no autorizada. ClientId={ClientId}",
+                    clientId);
                 throw new UnauthorizedAccessException("Aplicación cliente no autorizada.");
+            }
         }
 
         public async Task<(string Url, string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null, string? codeChallenge = null)
@@ -100,9 +105,14 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var stateId = stateData.GetProperty("stateId").GetString();
             var cacheKey = $"ms_state:{stateId}";
 
-            //_logger.LogInformation("******************HandleCallbackAsync - code: {code},  state: {state}", code, state);
+            _logger.LogInformation("[AZURE-LOGIN] Callback recibido. StateId={StateId}", stateId);
             if (!_cache.TryGetValue(cacheKey, out _))
+            {
+                _logger.LogWarning(
+                    "[AZURE-LOGIN] Rechazado: state inválido o expirado (o ya usado). StateId={StateId}",
+                    stateId);
                 throw new UnauthorizedAccessException("State inválido o expirado.");
+            }
 
             // Eliminar el state inmediatamente para evitar reutilización (anti-replay)
             _cache.Remove(cacheKey);
@@ -132,12 +142,21 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             if (!string.IsNullOrWhiteSpace(allowedDomain) &&
                 !email.EndsWith($"@{allowedDomain}", StringComparison.OrdinalIgnoreCase))
             {
+                _logger.LogWarning(
+                    "[AZURE-LOGIN] Rechazado: dominio no institucional. Email={Email}, DominioEsperado={AllowedDomain}",
+                    email, allowedDomain);
                 throw new UnauthorizedAccessException("Solo se permiten cuentas institucionales.");
             }
 
             var user = await _users.FindByEmailAsync(email);
-            if (user is null) return null;
-            _logger.LogInformation("***************usuario a conectar: {user}, {email}", user, email);
+            if (user is null)
+            {
+                _logger.LogWarning(
+                    "[AZURE-LOGIN] Rechazado: MFA de Azure exitoso pero no existe usuario local para este correo. Email={Email}, AzureObjectId={AzureId}",
+                    email, azureIdStr);
+                return null;
+            }
+            _logger.LogInformation("[AZURE-LOGIN] Usuario autenticado: {UserId}, {Email}", user.Id, email);
 
             // Sincronizar AzureObjectId en cada login para que el cambio de contraseña funcione
             if (azureIdStr != null && Guid.TryParse(azureIdStr, out var parsedObjectId))
@@ -166,7 +185,10 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             public required string CodeChallenge { get; init; }
         }
 
-        private static readonly TimeSpan DeliveryCodeLifetime = TimeSpan.FromSeconds(120);
+        // 300s (antes 120s): 120 era muy ajustado para MFA lento (SMS demorado, aprobación
+        // push tardía) — el usuario completaba el login en Azure pero el deliveryCode ya
+        // había expirado al momento de canjearlo, sin ningún aviso claro del motivo.
+        private static readonly TimeSpan DeliveryCodeLifetime = TimeSpan.FromSeconds(300);
 
         public async Task<(TokenPair? Pair, string? DeliveryCode)> CompleteLoginAndIssueDeliveryCodeAsync(
             string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
@@ -215,7 +237,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         {
             var cacheKey = $"delivery:{deliveryCode}";
             if (!_cache.TryGetValue(cacheKey, out DeliveryCodeEntry? entry) || entry is null)
+            {
+                // Causa más común: el usuario tardó más de DeliveryCodeLifetime (120s) en
+                // completar el MFA, o el mensaje de WebSocket llegó tarde/se perdió y el
+                // cliente reintentó el canje después de que expiró.
+                _logger.LogWarning(
+                    "[AZURE-LOGIN] Canje de deliveryCode falló: no existe o ya expiró (vida útil {Lifetime}s).",
+                    DeliveryCodeLifetime.TotalSeconds);
                 return Task.FromResult<TokenPair?>(null);
+            }
 
             var computedChallenge = ComputeCodeChallengeBase64Url(codeVerifier);
 
@@ -225,7 +255,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 Encoding.UTF8.GetBytes(computedChallenge),
                 Encoding.UTF8.GetBytes(entry.CodeChallenge));
 
-            if (!matches) return Task.FromResult<TokenPair?>(null);
+            if (!matches)
+            {
+                // Causa más común: azureCodeVerifierRef se perdió en el cliente (recarga de
+                // pestaña durante el login) y se está canjeando con un verifier distinto al
+                // que generó el codeChallenge original.
+                _logger.LogWarning(
+                    "[AZURE-LOGIN] Canje de deliveryCode falló: codeVerifier no coincide con el codeChallenge original.");
+                return Task.FromResult<TokenPair?>(null);
+            }
 
             // Un solo uso: se retira de la caché apenas se valida correctamente.
             _cache.Remove(cacheKey);

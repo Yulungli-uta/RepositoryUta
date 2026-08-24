@@ -22,6 +22,7 @@ public class AuthController : ControllerBase
     private readonly INotificationService _notificationService;
     private readonly IIdentityProviderResolver _identityResolver;
     private readonly IConfiguration _cfg;
+    private readonly ILogger<AuthController> _logger;
 
     public AuthController(
         IAuthService auth,
@@ -30,7 +31,8 @@ public class AuthController : ControllerBase
         IUserRepository users,
         INotificationService notificationService,
         IIdentityProviderResolver identityResolver,
-        IConfiguration cfg)
+        IConfiguration cfg,
+        ILogger<AuthController> logger)
     {
         _auth = auth;
         _azure = azure;
@@ -39,6 +41,7 @@ public class AuthController : ControllerBase
         _notificationService = notificationService;
         _identityResolver = identityResolver;
         _cfg = cfg;
+        _logger = logger;
     }
 
     [HttpPost("login")]
@@ -198,8 +201,26 @@ public class AuthController : ControllerBase
         }
         catch (UnauthorizedAccessException ex)
         {
+            _logger.LogWarning(
+                "[AZURE-LOGIN] Callback rechazado ({Message}). ClientId={ClientId}, BrowserId={BrowserId}",
+                ex.Message, clientId, browserId);
             return Content(
                 $"<html><body><h3>Acceso no autorizado</h3><p>{ex.Message}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
+                "text/html");
+        }
+        catch (Exception ex)
+        {
+            // Cubre fallas no anticipadas (MSAL/AcquireTokenByAuthorizationCode, Graph API,
+            // consulta a AD, etc.) que antes se propagaban al manejador global de excepciones
+            // y devolvían un 500 JSON crudo dentro del popup — sin script de cierre, sin
+            // mensaje entendible, y sin quedar claro que el error ocurrió en el callback de
+            // Azure. Ahora se responde con la misma página de cierre que el resto de casos de
+            // esta acción, y el detalle real queda solo en el log (nunca se expone al cliente).
+            _logger.LogError(ex,
+                "[AZURE-LOGIN] Error inesperado procesando el callback de Azure. ClientId={ClientId}, BrowserId={BrowserId}, TraceId={TraceId}",
+                clientId, browserId, HttpContext.TraceIdentifier);
+            return Content(
+                $"<html><body><h3>Ocurrió un error inesperado</h3><p>No se pudo completar el inicio de sesión. Cierra esta ventana e intenta de nuevo.</p><p style=\"font-size:11px;color:#888\">Referencia: {HttpContext.TraceIdentifier}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
                 "text/html");
         }
         //Console.WriteLine($"******************Azure login processed. pair: {pair}, TokenPair: {(pair != null ? "Success" : "Failed")}");
