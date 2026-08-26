@@ -1,0 +1,21 @@
+name: Notify uta-containers
+
+# La fuente Python vive en este repositorio, mientras Dockerfile, Compose y
+# publicacion se mantienen centralizados en uta-containers. Requiere el mismo
+# secret UTA_CONTAINERS_DISPATCH_TOKEN usado por los otros repos de aplicacion.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "python/**"
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger build in uta-containers
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.UTA_CONTAINERS_DISPATCH_TOKEN }}
+          repository: Yulungli-uta/uta-containers
+          event-type: repositoryuta-python-push
