@@ -1,0 +1,59 @@
+name: RepositoryUta Python CI
+
+on:
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "python/**"
+      - ".github/workflows/python-ci.yml"
+  push:
+    branches: [main, master]
+    paths:
+      - "python/**"
+      - ".github/workflows/python-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  quality-and-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject tracked local configuration or key material
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden="$(git ls-files | grep -E '(^|/)(\.env($|\.)|secrets?/|.*\.(pem|key|pfx|p12)$)|(^|/)VariablesEntorno\.txt$' || true)"
+          if [[ -n "$forbidden" ]]; then
+            echo "Se detectaron archivos sensibles versionados:" >&2
+            echo "$forbidden" >&2
+            exit 1
+          fi
+
+      - name: Scan repository for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.5"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test with coverage gate
+        run: uv run pytest --cov
