@@ -20,8 +20,42 @@ def test_get_effective_permissions_is_public_and_cached(client, sqlite_session) 
     response = client.get("/api/role-permissions/effective", params={"roles": ["R_RH"]})
 
     assert response.status_code == 200
-    assert response.json()["data"] == ["EMPLEADOS.READ"]
+    # Ambas formas: "MODULO.ACCION" (historica) y el name real del permiso.
+    assert sorted(response.json()["data"]) == ["EMPLEADOS.READ", "VER"]
     assert response.headers["cache-control"] == "public, max-age=60"
+
+
+def test_get_effective_permissions_distinguishes_same_module_action(
+    client, sqlite_session
+) -> None:
+    """Caso DINARDAP: varios permisos comparten module+action a proposito (para no
+    ampliar el CHECK de acciones) y solo se distinguen por name. Sin el name en la
+    respuesta, todos colapsaban en un unico "MODULO.ACCION" y ningun consumidor podia
+    pedir el permiso fino de uno en particular."""
+    role = Role(name="R_DINARDAP_LEGACY", is_active=True)
+    permissions = [
+        Permission(name="DINARDAP.REGISTRO_CIVIL.READ", module="DINARDAP", action="READ"),
+        Permission(name="DINARDAP.TCE.READ", module="DINARDAP", action="READ"),
+        Permission(name="DINARDAP.TITULOS.READ", module="DINARDAP", action="READ"),
+    ]
+    sqlite_session.add_all([role, *permissions])
+    sqlite_session.flush()
+    sqlite_session.add_all(
+        [RolePermission(role_id=role.id, permission_id=p.id) for p in permissions]
+    )
+    sqlite_session.flush()
+
+    response = client.get(
+        "/api/role-permissions/effective", params={"roles": ["R_DINARDAP_LEGACY"]}
+    )
+
+    assert response.status_code == 200
+    assert sorted(response.json()["data"]) == [
+        "DINARDAP.READ",
+        "DINARDAP.REGISTRO_CIVIL.READ",
+        "DINARDAP.TCE.READ",
+        "DINARDAP.TITULOS.READ",
+    ]
 
 
 def test_get_effective_permissions_empty_roles_returns_empty(client) -> None:

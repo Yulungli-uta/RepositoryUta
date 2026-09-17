@@ -43,15 +43,24 @@ def get_effective_permissions(
         return ApiResponse.ok([])
 
     stmt = (
-        select(Permission.module, Permission.action)
+        select(Permission.module, Permission.action, Permission.name)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
         .join(Role, Role.id == RolePermission.role_id)
         .where(Role.name.in_(roles), Role.is_active, ~Role.is_deleted)
         .where(~Permission.is_deleted)
         .distinct()
     )
-    codes = sorted({f"{module}.{action}".upper() for module, action in session.execute(stmt)})
-    return ApiResponse.ok(codes)
+    # Union de "MODULO.ACCION" (forma historica, la que ya consume HrBackend) con el name
+    # completo del permiso. Para el 99% de los permisos name == module.action, asi que esto
+    # es un no-op (el set los colapsa). Pero un modulo como DINARDAP puede tener varios
+    # permisos que comparten module+action a proposito (evita ampliar el CHECK de acciones) y
+    # solo se distinguen por name (ej. DINARDAP.REGISTRO_CIVIL.READ vs DINARDAP.TCE.READ) - sin
+    # el name, esos quedaban indistinguibles y ningun consumidor podia pedir el permiso fino.
+    codes: set[str] = set()
+    for module, action, name in session.execute(stmt):
+        codes.add(f"{module}.{action}".upper())
+        codes.add(name.upper())
+    return ApiResponse.ok(sorted(codes))
 
 
 @router.get("/role/{role_id}")
