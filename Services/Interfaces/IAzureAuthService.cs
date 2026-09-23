@@ -4,7 +4,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
 {
     public interface IAzureAuthService
     {
-        Task<(string Url, string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null, string? codeChallenge = null);
+        Task<(string Url, string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null, string? codeChallenge = null, string? deviceInfo = null);
         Task<TokenPair?> HandleCallbackAsync(string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null);
 
         /// <summary>

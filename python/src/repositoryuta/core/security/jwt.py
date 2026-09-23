@@ -102,6 +102,7 @@ def create_user_token(
     ad_groups: list[str] | None = None,
     employee_id: int | None = None,
     lifetime_minutes: int | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Espejo de JwtTokenService.CreateAsync (token de usuario)."""
     settings = get_settings()
@@ -125,6 +126,11 @@ def create_user_token(
         payload["ad_group"] = list(ad_groups)
     if employee_id is not None:
         payload["employeeId"] = employee_id
+    # Vincula el token a una fila concreta de auth.tbl_UserSessions: sin este claim,
+    # revocar una sesion en BD no tenia ningun efecto sobre un access token ya emitido
+    # (solo bloqueaba el refresh) — validate_token lo usa para chequear revocacion.
+    if session_id is not None:
+        payload["sid"] = session_id
 
     return pyjwt.encode(
         payload, provider.private_key, algorithm="RS256", headers={"kid": provider.key_id}

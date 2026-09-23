@@ -62,7 +62,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             }
         }
 
-        public async Task<(string Url, string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null, string? codeChallenge = null)
+        public async Task<(string Url, string State)> BuildAuthUrlAsync(string? clientId = null, string? browserId = null, string? codeChallenge = null, string? deviceInfo = null)
         {
             await ValidateClientApplicationAsync(clientId);
 
@@ -74,6 +74,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 stateId = stateGuid,
                 clientId = normalizedClientId,
                 browserId,
+                deviceInfo,
                 // Viaja codificado dentro del propio "state" de OAuth: Microsoft lo devuelve
                 // intacto en el callback, así que no hace falta guardarlo aparte en caché.
                 codeChallenge,
@@ -120,6 +121,16 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var clientId = stateData.TryGetProperty("clientId", out var cProp) && cProp.ValueKind != System.Text.Json.JsonValueKind.Null
                 ? cProp.GetString()
                 : null;
+            var browserId = stateData.TryGetProperty("browserId", out var bProp) && bProp.ValueKind != System.Text.Json.JsonValueKind.Null
+                ? bProp.GetString()
+                : null;
+            // El callback de Azure es una navegación del navegador (redirect de Microsoft), no
+            // un fetch con headers propios — X-Device-Info nunca llega aquí. Por eso viaja
+            // dentro del "state" (igual que browserId) desde BuildAuthUrlAsync.
+            var stateDeviceInfo = stateData.TryGetProperty("deviceInfo", out var dProp) && dProp.ValueKind != System.Text.Json.JsonValueKind.Null
+                ? dProp.GetString()
+                : null;
+            deviceInfo = stateDeviceInfo ?? deviceInfo;
 
             await ValidateClientApplicationAsync(clientId);
 
@@ -166,10 +177,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var adGroups = await GetAdGroupsAsync(email);
             _logger.LogInformation("***************usuario tiene roles: {adGroups}", adGroups);
             var hrEmployeeId = await _users.GetHrEmployeeIdAsync(user.Id);
-            var access = await _tokens.CreateAsync(user.Id, email, roles, adGroups, hrEmployeeId);
+            var newSessionId = Guid.NewGuid();
+            var access = await _tokens.CreateAsync(user.Id, email, roles, adGroups, hrEmployeeId, sessionId: newSessionId);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
-            var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, DateTime.Now.AddDays(7), null, null);
+            var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, DateTime.Now.AddDays(7), deviceInfo, ipAddress, userAgent, browserId, sessionId: newSessionId);
 
             await _users.SetLastLoginAsync(user.Id, DateTime.Now);
             await _auth.InsertLoginAsync(user.Id, email, true, "AzureAD", "Success", null, session.SessionId, ipAddress, userAgent, deviceInfo);

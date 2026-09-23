@@ -11,11 +11,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         public TokenService(JwtTokenService jwt) => _jwt = jwt;
 
-        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, int? hrEmployeeId = null, TimeSpan? lifetime = null, CancellationToken ct = default) =>
-            _jwt.CreateAsync(userId, email, roles, [], lifetime, hrEmployeeId, ct);
+        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, int? hrEmployeeId = null, TimeSpan? lifetime = null, CancellationToken ct = default, Guid? sessionId = null) =>
+            _jwt.CreateAsync(userId, email, roles, [], lifetime, hrEmployeeId, ct, sessionId);
 
-        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, int? hrEmployeeId = null, TimeSpan? lifetime = null, CancellationToken ct = default) =>
-            _jwt.CreateAsync(userId, email, roles, adGroups, lifetime, hrEmployeeId, ct);
+        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, int? hrEmployeeId = null, TimeSpan? lifetime = null, CancellationToken ct = default, Guid? sessionId = null) =>
+            _jwt.CreateAsync(userId, email, roles, adGroups, lifetime, hrEmployeeId, ct, sessionId);
 
         public Task<string> CreateAppTokenAsync(Guid tokenId, string clientId, IEnumerable<string> roles, TimeSpan lifetime, CancellationToken ct = default) =>
             _jwt.CreateAppTokenAsync(tokenId, clientId, roles, lifetime, ct);

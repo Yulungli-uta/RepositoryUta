@@ -39,7 +39,7 @@ public interface IAccessProfileAssignmentService
 
 public interface IAuthRepository
 {
-    Task<UserSession> CreateSessionAsync(Guid userId, string accessToken, string refreshHash, DateTime expiresAt, string? device, string? ip);
+    Task<UserSession> CreateSessionAsync(Guid userId, string accessToken, string refreshHash, DateTime expiresAt, string? device, string? ip, string? userAgent = null, string? browserId = null, Guid? sessionId = null);
     Task<(UserSession Sess, User User)?> GetActiveSessionByRefreshHashAsync(string refreshHash);
 
     /// <summary>
@@ -106,9 +106,10 @@ public class AuthRepository : IAuthRepository
     private readonly AuthDbContext _db;
     public AuthRepository(AuthDbContext db) => _db = db;
 
-    public async Task<UserSession> CreateSessionAsync(Guid userId, string accessToken, string refreshHash, DateTime expiresAt, string? device, string? ip)
+    public async Task<UserSession> CreateSessionAsync(Guid userId, string accessToken, string refreshHash, DateTime expiresAt, string? device, string? ip, string? userAgent = null, string? browserId = null, Guid? sessionId = null)
     {
-        var s = new UserSession { UserId = userId, AccessToken = accessToken, RefreshToken = refreshHash, ExpiresAt = expiresAt, DeviceInfo = device, IpAddress = ip, IsActive = true, Status="Active" };
+        var s = new UserSession { UserId = userId, AccessToken = accessToken, RefreshToken = refreshHash, ExpiresAt = expiresAt, DeviceInfo = device, IpAddress = ip, UserAgent = userAgent, BrowserId = browserId, IsActive = true, Status="Active" };
+        if (sessionId.HasValue) s.SessionId = sessionId.Value;
         _db.UserSessions.Add(s); await _db.SaveChangesAsync(); return s;
     }
 

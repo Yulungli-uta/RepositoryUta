@@ -72,6 +72,7 @@ def build_auth_url(
     client_id: str | None,
     browser_id: str | None = None,
     code_challenge: str | None = None,
+    device_info: str | None = None,
 ) -> tuple[str, str]:
     """Espejo de AzureAuthService.BuildAuthUrlAsync."""
     _validate_client_application(session, client_id)
@@ -82,6 +83,7 @@ def build_auth_url(
         "stateId": state_id,
         "clientId": normalized_client_id,
         "browserId": browser_id,
+        "deviceInfo": device_info,
         "codeChallenge": code_challenge,
         "timestamp": datetime.now().isoformat(),
         "source": "azure_auth",
@@ -121,6 +123,11 @@ def handle_callback(
     _state_cache.remove(cache_key)
 
     client_id = state_data.get("clientId")
+    browser_id = state_data.get("browserId")
+    # El callback de Azure es una navegacion del navegador (redirect de Microsoft), no
+    # un fetch con headers propios — X-Device-Info nunca llega aqui. Por eso viaja
+    # dentro del "state" (igual que browser_id) desde build_auth_url.
+    device_info = state_data.get("deviceInfo") or device_info
     _validate_client_application(session, client_id)
 
     settings = get_settings().azure_ad
@@ -159,8 +166,14 @@ def handle_callback(
     ad_groups = auth_service.get_ad_groups(email)
     hr_employee_id = users.get_hr_employee_id(user.id)
 
+    new_session_id = uuid.uuid4()
     access_token = jwt_core.create_user_token(
-        str(user.id), email, roles, ad_groups=ad_groups, employee_id=hr_employee_id
+        str(user.id),
+        email,
+        roles,
+        ad_groups=ad_groups,
+        employee_id=hr_employee_id,
+        session_id=str(new_session_id),
     )
     refresh_token = base64.b64encode(secrets.token_bytes(48)).decode("ascii")
     refresh_hash = token_service.hash_token(refresh_token)
@@ -172,8 +185,11 @@ def handle_callback(
         access_token=access_token,
         refresh_token_hash=refresh_hash,
         expires_at=now + timedelta(days=7),
-        device=None,
-        ip_address=None,
+        device=device_info,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        browser_id=browser_id,
+        session_id=new_session_id,
     )
     users.set_last_login(user.id, now)
 

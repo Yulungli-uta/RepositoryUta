@@ -2,7 +2,7 @@ import base64
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import jwt as pyjwt
 from sqlalchemy import select
@@ -62,13 +62,10 @@ def login_local(
     ip_address: str | None = None,
     user_agent: str | None = None,
     device_info: str | None = None,
+    browser_id: str | None = None,
 ) -> TokenPair | None:
     """Espejo de AuthService.LoginLocalAsync — mismo orden de validaciones,
     mismos umbrales (5 intentos, bloqueo 30 min, sesion 7 dias).
-
-    Detalle preservado a proposito: la sesion se crea con device/ip en NULL
-    aunque se reciban como parametros (solo LoginHistory los guarda) — es una
-    inconsistencia real del .NET, no se "arregla" de paso.
     """
     now = datetime.now()
     users = UserRepository(session)
@@ -125,8 +122,14 @@ def login_local(
     ad_groups = get_ad_groups(user.email)
     hr_employee_id = users.get_hr_employee_id(user.id)
 
+    new_session_id = uuid4()
     access_token = jwt_core.create_user_token(
-        str(user.id), user.email, roles, ad_groups=ad_groups, employee_id=hr_employee_id
+        str(user.id),
+        user.email,
+        roles,
+        ad_groups=ad_groups,
+        employee_id=hr_employee_id,
+        session_id=str(new_session_id),
     )
     refresh_token = _generate_refresh_token()
     refresh_hash = token_service.hash_token(refresh_token)
@@ -136,8 +139,11 @@ def login_local(
         access_token=access_token,
         refresh_token_hash=refresh_hash,
         expires_at=now + timedelta(days=REFRESH_TOKEN_TTL_DAYS),
-        device=None,
-        ip_address=None,
+        device=device_info,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        browser_id=browser_id,
+        session_id=new_session_id,
     )
     users.set_last_login(user.id, now)
 
@@ -158,8 +164,8 @@ def login_local(
 
 def refresh(session: Session, refresh_token: str) -> TokenPair | None:
     """Espejo de AuthService.RefreshAsync: rota el refresh token heredando
-    device/ip de la sesion anterior (a diferencia del login, aqui SI se
-    heredan)."""
+    device/ip/user_agent/browser_id de la sesion anterior (a diferencia del
+    login, aqui SI se heredan)."""
     sessions = SessionRepository(session)
     users = UserRepository(session)
     refresh_hash = token_service.hash_token(refresh_token)
@@ -174,8 +180,14 @@ def refresh(session: Session, refresh_token: str) -> TokenPair | None:
     ad_groups = get_ad_groups(user.email)
     hr_employee_id = users.get_hr_employee_id(user.id)
 
+    new_session_id = uuid4()
     new_access = jwt_core.create_user_token(
-        str(user.id), user.email, roles, ad_groups=ad_groups, employee_id=hr_employee_id
+        str(user.id),
+        user.email,
+        roles,
+        ad_groups=ad_groups,
+        employee_id=hr_employee_id,
+        session_id=str(new_session_id),
     )
     new_refresh_token = _generate_refresh_token()
     new_hash = token_service.hash_token(new_refresh_token)
@@ -189,6 +201,9 @@ def refresh(session: Session, refresh_token: str) -> TokenPair | None:
         expires_at=new_expiry,
         device=old_session.device_info,
         ip_address=old_session.ip_address,
+        user_agent=old_session.user_agent,
+        browser_id=old_session.browser_id,
+        session_id=new_session_id,
     )
     return TokenPair(access_token=new_access, refresh_token=new_refresh_token)
 
@@ -289,6 +304,27 @@ def validate_token(session: Session, token: str) -> ValidateTokenResponse:
 
             expires_at = datetime.fromtimestamp(payload["exp"], tz=UTC)
 
+            # Tokens emitidos antes de este chequeo no traen "sid" — se validan igual
+            # que siempre (sin esto, cualquier sesion activa quedaria deslogueada al
+            # desplegar este cambio).
+            sid_raw = payload.get("sid")
+            sid: UUID | None = None
+            if sid_raw is not None:
+                try:
+                    sid = UUID(str(sid_raw))
+                except (ValueError, TypeError):
+                    sid = None
+                if sid is not None:
+                    session_active = SessionRepository(session).is_session_active(sid)
+                    if session_active is False:
+                        return ValidateTokenResponse(
+                            is_valid=False,
+                            token_type="JWT",
+                            session_id=sid,
+                            message="Sesión revocada",
+                            email="",
+                        )
+
             user_id_raw = payload.get(jwt_core.CLAIM_NAME_IDENTIFIER) or payload.get("sub")
             try:
                 user_id = UUID(str(user_id_raw))
@@ -303,6 +339,7 @@ def validate_token(session: Session, token: str) -> ValidateTokenResponse:
                         token_type="JWT",
                         expires_at=expires_at,
                         user_id=user_id,
+                        session_id=sid,
                         message="Token is valid",
                         email=user.email,
                     )

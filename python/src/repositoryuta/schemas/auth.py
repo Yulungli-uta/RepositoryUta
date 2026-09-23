@@ -7,6 +7,7 @@ from repositoryuta.core.schema_base import ApiModel
 class LoginRequest(ApiModel):
     email: str
     password: str
+    browser_id: str | None = None
 
 
 class RefreshRequest(ApiModel):
@@ -22,6 +23,7 @@ class AzureAuthUrlRequest(ApiModel):
     client_id: str | None = None
     browser_id: str | None = None
     code_challenge: str | None = None
+    device_info: str | None = None
 
 
 class AzureExchangeRequest(ApiModel):

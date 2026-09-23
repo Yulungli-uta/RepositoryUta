@@ -4,9 +4,9 @@ public record ApiResponse(bool Success, object? Data, string? Message, IEnumerab
 { public static ApiResponse Ok(object? data=null, string? message=null) => new(true, data, message, null, DateTime.Now);
   public static ApiResponse Fail(string message, IEnumerable<string>? errors=null) => new(false, null, message, errors, DateTime.Now); }
 
-public record AzureAuthUrlRequest(string? ClientId = null, string? BrowserId = null, string? CodeChallenge = null);
+public record AzureAuthUrlRequest(string? ClientId = null, string? BrowserId = null, string? CodeChallenge = null, string? DeviceInfo = null);
 
-public record LoginRequest(string Email, string Password);
+public record LoginRequest(string Email, string Password, string? BrowserId = null);
 public record RefreshRequest(string RefreshToken);
 public record TokenPair(string AccessToken, string RefreshToken);
 

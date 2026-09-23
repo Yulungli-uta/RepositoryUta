@@ -37,7 +37,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             _keys = keys;
         }
 
-        public async Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
+        public async Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null, string? browserId = null)
         {
             var now = DateTime.Now;
             var u = await _users.FindByEmailAsync(email);
@@ -91,10 +91,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var roles = await _users.GetRolesAsync(u.Id);
             var adGroups = await GetAdGroupsAsync(u.Email);
             var hrEmployeeId = await _users.GetHrEmployeeIdAsync(u.Id);
-            var access = await _tokens.CreateAsync(u.Id, u.Email, roles, adGroups, hrEmployeeId);
+            var newSessionId = Guid.NewGuid();
+            var access = await _tokens.CreateAsync(u.Id, u.Email, roles, adGroups, hrEmployeeId, sessionId: newSessionId);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
-            var session = await _auth.CreateSessionAsync(u.Id, access, refreshHash, now.AddDays(7), null, null);
+            var session = await _auth.CreateSessionAsync(u.Id, access, refreshHash, now.AddDays(7), deviceInfo, ipAddress, userAgent, browserId, sessionId: newSessionId);
             await _users.SetLastLoginAsync(u.Id, now);
             await _auth.InsertLoginAsync(u.Id, email, true, "Local", "Success", null, session.SessionId, ipAddress, userAgent, deviceInfo);
             _logger.LogInformation("Login exitoso para {Email}, SessionId: {SessionId}", email, session.SessionId);
@@ -116,12 +117,13 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var roles = await _users.GetRolesAsync(u.Id);
             var adGroups = await GetAdGroupsAsync(u.Email);
             var hrEmployeeId = await _users.GetHrEmployeeIdAsync(u.Id);
-            var newAccess = await _tokens.CreateAsync(u.Id, u.Email, roles, adGroups, hrEmployeeId);
+            var newSessionId = Guid.NewGuid();
+            var newAccess = await _tokens.CreateAsync(u.Id, u.Email, roles, adGroups, hrEmployeeId, sessionId: newSessionId);
             var newRefresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var newHash = _tokens.Hash(newRefresh);
             var newExp = DateTime.Now.AddDays(7);
             await _auth.RevokeSessionAsync(sess.SessionId, "Rotated");
-            await _auth.CreateSessionAsync(u.Id, newAccess, newHash, newExp, sess.DeviceInfo, sess.IpAddress);
+            await _auth.CreateSessionAsync(u.Id, newAccess, newHash, newExp, sess.DeviceInfo, sess.IpAddress, sess.UserAgent, sess.BrowserId, sessionId: newSessionId);
             return new TokenPair(newAccess, newRefresh);
         }
 
@@ -249,6 +251,31 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                         var rolesClaims = principal.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
                         _logger.LogDebug("Claims del token: sub={UserId}, roles={Roles}", userIdClaim, string.Join(",", rolesClaims));
 
+                        // Tokens emitidos antes de este chequeo no traen "sid" — se validan
+                        // igual que siempre (sin esto, cualquier sesión activa quedaría
+                        // deslogueada al desplegar este cambio).
+                        var sidClaim = principal.FindFirst("sid")?.Value;
+                        if (Guid.TryParse(sidClaim, out var sessionId))
+                        {
+                            var sessionActive = await _context.UserSessions
+                                .AsNoTracking()
+                                .Where(s => s.SessionId == sessionId)
+                                .Select(s => (bool?)s.IsActive)
+                                .FirstOrDefaultAsync();
+
+                            if (sessionActive == false)
+                            {
+                                return new ValidateTokenResponse(
+                                    IsValid: false,
+                                    TokenType: "JWT",
+                                    ExpiresAt: null,
+                                    UserId: null,
+                                    SessionId: sessionId,
+                                    Message: "Sesión revocada",
+                                    Email: string.Empty);
+                            }
+                        }
+
                         if (Guid.TryParse(userIdClaim, out var userId))
                         {
                             var user = await _users.FindByIdAsync(userId);
@@ -259,7 +286,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                                     TokenType: "JWT",
                                     ExpiresAt: ((JwtSecurityToken)validatedToken).ValidTo,
                                     UserId: userId,
-                                    SessionId: null,
+                                    SessionId: Guid.TryParse(sidClaim, out var sid) ? sid : null,
                                     Message: "Token is valid",
                                     Email: user.Email);
                             }

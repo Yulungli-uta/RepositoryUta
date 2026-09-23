@@ -42,10 +42,10 @@ namespace WsSeguUta.AuthSystem.API.Security
             _fallbackLifetime = TimeSpan.FromMinutes(configuredMinutes is > 0 ? configuredMinutes.Value : 30);
         }
 
-        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default)
-            => CreateAsync(userId, email, roles, [], lifetime, hrEmployeeId, ct);
+        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default, Guid? sessionId = null)
+            => CreateAsync(userId, email, roles, [], lifetime, hrEmployeeId, ct, sessionId);
 
-        public async Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default)
+        public async Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default, Guid? sessionId = null)
         {
             var claims = new List<Claim>
             {
@@ -59,6 +59,11 @@ namespace WsSeguUta.AuthSystem.API.Security
             claims.AddRange(adGroups.Select(g => new Claim("ad_group", g)));
             if (hrEmployeeId.HasValue)
                 claims.Add(new Claim("employeeId", hrEmployeeId.Value.ToString()));
+            // Vincula el token a una fila concreta de auth.tbl_UserSessions: sin este claim,
+            // revocar una sesión en BD no tenía ningún efecto sobre un access token ya emitido
+            // (solo bloqueaba el refresh) — ValidateTokenAsync lo usa para chequear revocación.
+            if (sessionId.HasValue)
+                claims.Add(new Claim("sid", sessionId.Value.ToString()));
 
             var effectiveLifetime = lifetime ?? await GetAccessTokenLifetimeAsync(ct);
 

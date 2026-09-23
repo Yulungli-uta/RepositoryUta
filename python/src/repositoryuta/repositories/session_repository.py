@@ -28,6 +28,9 @@ class SessionRepository:
         expires_at: datetime,
         device: str | None,
         ip_address: str | None,
+        user_agent: str | None = None,
+        browser_id: str | None = None,
+        session_id: UUID | None = None,
     ) -> UserSession:
         session_row = UserSession(
             user_id=user_id,
@@ -36,9 +39,13 @@ class SessionRepository:
             expires_at=expires_at,
             device_info=device,
             ip_address=ip_address,
+            user_agent=user_agent,
+            browser_id=browser_id,
             is_active=True,
             status="Active",
         )
+        if session_id is not None:
+            session_row.session_id = session_id
         self._session.add(session_row)
         self._session.flush()
         return session_row
@@ -95,6 +102,14 @@ class SessionRepository:
         session_row.status = reason or "Revoked"
         session_row.revoked_at = datetime.now()
         self._session.flush()
+
+    def is_session_active(self, session_id: UUID) -> bool | None:
+        """Espejo del chequeo de revocacion en AuthService.ValidateTokenAsync (.NET):
+        None si la sesion no existe (token con "sid" desconocido, no se bloquea por
+        eso), True/False segun IsActive si existe."""
+        return self._session.scalar(
+            select(UserSession.is_active).where(UserSession.session_id == session_id)
+        )
 
     def find_active_by_session_id(self, session_id: UUID) -> UserSession | None:
         """Rama legado de ValidateTokenAsync: trata el propio SessionId como un

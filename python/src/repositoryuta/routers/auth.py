@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from repositoryuta.config import get_settings
-from repositoryuta.core.rate_limit import LOGIN_RATE_LIMIT, limiter
+from repositoryuta.core.rate_limit import LOGIN_RATE_LIMIT, get_client_ip, limiter
 from repositoryuta.core.schema_base import dump
 from repositoryuta.routers.dependencies import get_current_user_id, get_db_session
 from repositoryuta.schemas.auth import (
@@ -26,19 +26,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
 
-def _client_ip(request: Request) -> str | None:
-    """Espejo de AuthController.GetClientIp: X-Forwarded-For > X-Real-IP > IP
-    de conexion directa, normalizando loopback IPv6 a 127.0.0.1."""
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-
-    ip = request.client.host if request.client else None
-    return "127.0.0.1" if ip == "::1" else ip
+_client_ip = get_client_ip
 
 
 def _device_info(request: Request) -> str | None:
@@ -57,6 +45,7 @@ def login(
         ip_address=_client_ip(request),
         user_agent=request.headers.get("User-Agent"),
         device_info=_device_info(request),
+        browser_id=body.browser_id,
     )
     if pair is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
@@ -201,10 +190,13 @@ def azure_url_get(
     clientId: str | None = None,
     browserId: str | None = None,
     codeChallenge: str | None = None,
+    deviceInfo: str | None = None,
     session: Session = Depends(get_db_session),
 ) -> ApiResponse:
     try:
-        url, state = azure_auth_service.build_auth_url(session, clientId, browserId, codeChallenge)
+        url, state = azure_auth_service.build_auth_url(
+            session, clientId, browserId, codeChallenge, deviceInfo
+        )
     except PermissionError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
     return ApiResponse.ok(
@@ -225,7 +217,7 @@ def azure_url_post(
 ) -> ApiResponse:
     try:
         url, state = azure_auth_service.build_auth_url(
-            session, body.client_id, body.browser_id, body.code_challenge
+            session, body.client_id, body.browser_id, body.code_challenge, body.device_info
         )
     except PermissionError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
@@ -291,6 +283,7 @@ def azure_callback(
                 state,
                 ip_address=_client_ip(request),
                 user_agent=request.headers.get("User-Agent"),
+                device_info=_device_info(request),
             )
         else:
             pair = azure_auth_service.handle_callback(
@@ -299,6 +292,7 @@ def azure_callback(
                 state,
                 ip_address=_client_ip(request),
                 user_agent=request.headers.get("User-Agent"),
+                device_info=_device_info(request),
             )
             delivery_code = None
     except PermissionError as exc:
