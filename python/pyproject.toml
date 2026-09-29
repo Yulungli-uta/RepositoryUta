@@ -4,11 +4,19 @@ version = "0.1.0"
 description = "Migracion progresiva de RepositoryUta a FastAPI"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "bcrypt==4.3.0",
+  "cryptography==50.0.1",
   "fastapi==0.141.1",
+  "ldap3==2.9.1",
+  "msgpack==1.2.2",
+  "msal==1.38.0",
   "pydantic==2.13.4",
   "pydantic-settings==2.15.0",
+  "pyjwt[crypto]==2.13.0",
   "pyodbc==5.3.0",
+  "slowapi==0.1.10",
   "sqlalchemy==2.0.52",
+  "setuptools==84.0.0",
   "uvicorn[standard]==0.52.4",
 ]
 
@@ -34,6 +42,19 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI usa Depends()/Header()/etc. como valor por defecto a proposito (es
+# el mecanismo de inyeccion de dependencias) — no es el antipatron que B008
+# busca detectar.
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.Header",
+  "fastapi.Query",
+  "fastapi.Path",
+  "fastapi.Body",
+  "repositoryuta.routers.dependencies.require_roles",
+]
 
 [tool.coverage.run]
 branch = true

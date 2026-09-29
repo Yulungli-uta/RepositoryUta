@@ -53,7 +53,7 @@ public class AuthController : ControllerBase
         var ua = GetUserAgent();
         var device = GetDeviceInfo();
 
-        var pair = await _auth.LoginLocalAsync(req.Email, req.Password, ipAddress: ip, userAgent: ua, deviceInfo: device);
+        var pair = await _auth.LoginLocalAsync(req.Email, req.Password, ipAddress: ip, userAgent: ua, deviceInfo: device, browserId: req.BrowserId);
         return pair is null ? Unauthorized(ApiResponse.Fail("Credenciales inválidas")) : Ok(ApiResponse.Ok(pair, "Login exitoso"));
     }
 
@@ -88,11 +88,12 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> AzureUrlGet(
         [FromQuery] string? clientId = null,
         [FromQuery] string? browserId = null,
-        [FromQuery] string? codeChallenge = null)
+        [FromQuery] string? codeChallenge = null,
+        [FromQuery] string? deviceInfo = null)
     {
         try
         {
-            var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId, codeChallenge);
+            var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId, codeChallenge, deviceInfo);
             return Ok(ApiResponse.Ok(new
             {
                 url,
@@ -115,7 +116,7 @@ public class AuthController : ControllerBase
     {
         try
         {
-            var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId, req.CodeChallenge);
+            var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId, req.CodeChallenge, req.DeviceInfo);
             return Ok(ApiResponse.Ok(new
             {
                 url,
@@ -157,8 +158,9 @@ public class AuthController : ControllerBase
     {
         //Console.WriteLine($"*******************Azure callback received. Code: {code}, State: {state}");
         // Obtener IP del cliente
-        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var clientIp = GetClientIp();
         var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
+        var deviceInfo = GetDeviceInfo();
         string? clientId = null;
         string? browserId = null;
         try
@@ -192,11 +194,13 @@ public class AuthController : ControllerBase
         {
             if (secureTokenDelivery)
             {
-                (pair, deliveryCode) = await _azure.CompleteLoginAndIssueDeliveryCodeAsync(code, state);
+                (pair, deliveryCode) = await _azure.CompleteLoginAndIssueDeliveryCodeAsync(
+                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo);
             }
             else
             {
-                pair = await _azure.HandleCallbackAsync(code, state);
+                pair = await _azure.HandleCallbackAsync(
+                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo);
             }
         }
         catch (UnauthorizedAccessException ex)

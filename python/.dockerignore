@@ -1,0 +1,26 @@
+# El contexto de Docker nunca debe contener configuracion local, secretos ni
+# artefactos de desarrollo. La imagen solo necesita pyproject.toml, uv.lock y
+# src/ (copiados explicitamente por el Dockerfile).
+.env
+.env.*
+secrets/
+*.pem
+*.key
+*.pfx
+*.p12
+
+.venv/
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+.coverage
+htmlcov/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+tests/
+README.md
+LOCAL_SETUP.md
+run_dev.py
+requirements.txt
