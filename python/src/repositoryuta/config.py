@@ -24,7 +24,8 @@ class JwtSettings(BaseModel):
     private_key_path: Path | None = None
     private_key_pem: str | None = Field(default=None, repr=False)
     # Fallback estatico; en produccion el valor real se lee de auth.tbl_AppParams (Fase 4).
-    access_token_lifetime_minutes: int = Field(default=30, ge=1, le=1440)
+    # Sincronizado a 60 min 2026-09-28 (ver auth.tbl_AppParams['Jwt:AccessTokenLifetimeMinutes']).
+    access_token_lifetime_minutes: int = Field(default=60, ge=1, le=1440)
 
 
 class CorsSettings(BaseModel):
