@@ -5,10 +5,19 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>WsSeguUta.AuthSystem.API</RootNamespace>
     <UserSecretsId>2394f7d3-e246-461f-9f3c-e200ef3f3332</UserSecretsId>
+    <!-- Sin esto, el SDK regenera web.config en cada publish con su propia plantilla
+         (sin <requestFiltering>/<tracing> propios), descartando silenciosamente
+         Configuration\web.config pese al Content Update de abajo con PreserveNewest. -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
   </PropertyGroup>
   <ItemGroup>
     <Content Update="Configuration\appsettings.Production.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/>
-    <Content Update="Configuration\web.config" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/>
+    <!-- Debe vivir en la raiz del proyecto (no en Configuration\): un Content Update conserva
+         la ruta relativa original del item al copiar, asi que si el archivo fuente estuviera en
+         Configuration\web.config terminaria en Configuration\web.config dentro del publish,
+         NUNCA en la raiz del publish (unico lugar donde IIS lo lee). Verificado 2026-10-01
+         publicando a una carpeta de prueba e inspeccionando el resultado. -->
+    <Content Update="web.config" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"/>
   </ItemGroup>
 
   <!-- Tools/ contiene proyectos de consola independientes (ej. JwtKeyGen); excluidos aqui
