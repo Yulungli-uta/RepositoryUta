@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -24,8 +25,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly ILogger<AuthService> _logger;
         private readonly IIdentityProviderResolver _identityResolver;
         private readonly RsaKeyProvider _keys;
+        private readonly IMemoryCache _cache;
 
-        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger, IIdentityProviderResolver identityResolver, RsaKeyProvider keys)
+        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger, IIdentityProviderResolver identityResolver, RsaKeyProvider keys, IMemoryCache cache)
         {
             _users = users;
             _auth = auth;
@@ -35,6 +37,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             _logger = logger;
             _identityResolver = identityResolver;
             _keys = keys;
+            _cache = cache;
         }
 
         public async Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null, string? browserId = null)
@@ -525,23 +528,56 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             password.Any(char.IsUpper) &&
             password.Any(char.IsDigit);
 
+        // TTL corto: reduce llamadas repetidas a AD en login/refresh frecuentes sin dejar
+        // un cambio real de grupos desactualizado por mucho tiempo (de todas formas el
+        // access token ya tiene su propia vida de Jwt:AccessTokenLifetimeMinutes).
+        private static readonly TimeSpan AdGroupsCacheTtl = TimeSpan.FromMinutes(5);
+
+        // Más corto que LocalAd:TimeoutSeconds (10s, por intento LDAP) a propósito: bajo
+        // carga concurrente o con AD degradado, el login no debe esperar el timeout
+        // completo — mejor responder rápido sin grupos que colgar la petición. Hallazgo
+        // real de la prueba de carga 2026-10-01 (ver memoria): logins concurrentes
+        // llegaron a tardar 58s esperando este punto.
+        private static readonly TimeSpan AdGroupsLookupTimeout = TimeSpan.FromSeconds(3);
+
         private async Task<string[]> GetAdGroupsAsync(string email)
         {
+            var cacheKey = $"adgroups:{email.ToLowerInvariant()}";
+            if (_cache.TryGetValue(cacheKey, out string[]? cached) && cached is not null)
+            {
+                return cached;
+            }
+
+            Task<string[]> lookupTask;
             try
             {
-                ;
-                var dir = _identityResolver.GetDirectory("LocalAd");
-                var adUser = await dir.GetUserByEmailAsync(email);
-                _logger.LogInformation("[AD-GROUPS] Usuario {Email} no encontrado en AD local, se omiten grupos - adUser {adUser}", email, adUser);
-                if (adUser is null)
+                lookupTask = LookupAdGroupsNowAsync(email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[AD-GROUPS] Error al consultar AD para {Email}, se continúa sin grupos", email);
+                return [];
+            }
+
+            var winner = await Task.WhenAny(lookupTask, Task.Delay(AdGroupsLookupTimeout));
+            if (winner != lookupTask)
+            {
+                _logger.LogWarning(
+                    "[AD-GROUPS] Consulta a AD para {Email} superó {TimeoutSeconds}s, se continúa sin grupos. " +
+                    "El intento sigue en segundo plano; si termina, cachea el resultado real para el próximo login.",
+                    email, AdGroupsLookupTimeout.TotalSeconds);
+                _ = lookupTask.ContinueWith(t =>
                 {
-                    _logger.LogInformation("[AD-GROUPS] Usuario {Email} no encontrado en AD local, se omiten grupos", email);
-                    return [];
-                }
-                var groups = await dir.GetUserGroupsAsync(adUser.Id);
-                var names = groups.Select(g => g.Name).ToArray();
-                _logger.LogInformation("[AD-GROUPS] {Count} grupos obtenidos del AD para {Email}: {Groups}",
-                    names.Length, email, string.Join(", ", names));
+                    if (t.IsCompletedSuccessfully)
+                        _cache.Set(cacheKey, t.Result, AdGroupsCacheTtl);
+                }, TaskScheduler.Default);
+                return [];
+            }
+
+            try
+            {
+                var names = await lookupTask;
+                _cache.Set(cacheKey, names, AdGroupsCacheTtl);
                 return names;
             }
             catch (Exception ex)
@@ -549,6 +585,22 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 _logger.LogError(ex, "[AD-GROUPS] Error al consultar AD para {Email}, se continúa sin grupos", email);
                 return [];
             }
+        }
+
+        private async Task<string[]> LookupAdGroupsNowAsync(string email)
+        {
+            var dir = _identityResolver.GetDirectory("LocalAd");
+            var adUser = await dir.GetUserByEmailAsync(email);
+            if (adUser is null)
+            {
+                _logger.LogInformation("[AD-GROUPS] Usuario {Email} no encontrado en AD local, se omiten grupos", email);
+                return [];
+            }
+            var groups = await dir.GetUserGroupsAsync(adUser.Id);
+            var names = groups.Select(g => g.Name).ToArray();
+            _logger.LogInformation("[AD-GROUPS] {Count} grupos obtenidos del AD para {Email}: {Groups}",
+                names.Length, email, string.Join(", ", names));
+            return names;
         }
     }
 }

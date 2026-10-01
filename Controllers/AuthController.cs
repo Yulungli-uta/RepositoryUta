@@ -82,9 +82,12 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse.Ok(true, "Sesión cerrada"));
     }
 
+    // Sin EnableRateLimiting: este endpoint no valida contraseña, solo devuelve la URL
+    // de Microsoft para redirigir — no protege nada contra fuerza bruta. Limitarlo aquí
+    // solo castigaba a usuarios legítimos detrás de la misma salida de red (NAT de
+    // campus), bloqueando el primer paso del login para todos por igual.
     [HttpGet("azure/url")]
     [AllowAnonymous]
-    [EnableRateLimiting("login")]
     public async Task<IActionResult> AzureUrlGet(
         [FromQuery] string? clientId = null,
         [FromQuery] string? browserId = null,
@@ -111,7 +114,6 @@ public class AuthController : ControllerBase
 
     [HttpPost("azure/url")]
     [AllowAnonymous]
-    [EnableRateLimiting("login")]
     public async Task<IActionResult> AzureUrlPost([FromBody] AzureAuthUrlRequest req)
     {
         try
