@@ -18,11 +18,15 @@ public class AccessProfileAssignmentService : IAccessProfileAssignmentService
     private readonly IGenericRepository<UserAccessProfile> _userProfileRepo;
     private readonly ICrudService<UserRole, CreateUserRoleDto, UpdateUserRoleDto> _userRoles;
 
+    private readonly IAppClock _clock;
+
     public AccessProfileAssignmentService(
         AuthDbContext db,
         IGenericRepository<UserAccessProfile> userProfileRepo,
-        ICrudService<UserRole, CreateUserRoleDto, UpdateUserRoleDto> userRoles)
+        ICrudService<UserRole, CreateUserRoleDto, UpdateUserRoleDto> userRoles,
+        IAppClock clock)
     {
+        _clock = clock;
         _db = db;
         _userProfileRepo = userProfileRepo;
         _userRoles = userRoles;
@@ -82,7 +86,7 @@ public class AccessProfileAssignmentService : IAccessProfileAssignmentService
         else if (existingAssignment.IsDeleted)
         {
             existingAssignment.IsDeleted = false;
-            existingAssignment.AssignedAt = DateTime.Now;
+            existingAssignment.AssignedAt = _clock.Now;
             existingAssignment.AssignedBy = assignedBy;
             await _userProfileRepo.UpdateAsync(existingAssignment);
         }

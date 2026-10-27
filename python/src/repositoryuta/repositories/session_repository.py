@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.models.identity import User
 from repositoryuta.models.session import FailedLoginAttempt, UserSession
 from repositoryuta.models.views import VwActiveSession
@@ -43,6 +44,8 @@ class SessionRepository:
             browser_id=browser_id,
             is_active=True,
             status="Active",
+            # Hora local, igual que el .NET (DateTime.Now); el default de BD es UTC
+            created_at=clock.now(),
         )
         if session_id is not None:
             session_row.session_id = session_id
@@ -53,7 +56,7 @@ class SessionRepository:
     def get_active_session_by_refresh_hash(
         self, refresh_hash: str
     ) -> tuple[UserSession, User] | None:
-        now = datetime.now()
+        now = clock.now()
         session_row = self._session.scalar(
             select(UserSession).where(
                 UserSession.refresh_token == refresh_hash,
@@ -88,11 +91,32 @@ class SessionRepository:
             update(UserSession)
             .where(UserSession.user_id == user_id, UserSession.is_active)
             .values(
-                is_active=False, status=reason, revoked_at=datetime.now(), revoked_by="System"
+                is_active=False, status=reason, revoked_at=clock.now(), revoked_by="System"
             )
         )
         result = self._session.execute(stmt)
         return result.rowcount
+
+    def revoke_other_browser_sessions(
+        self, user_id: UUID, browser_id: str | None, except_session_id: UUID
+    ) -> int:
+        """Cierra las demas sesiones activas del usuario en el MISMO navegador: comparten tokens
+        locales, asi que las anteriores ya no se pueden usar y solo se acumulaban."""
+        if not browser_id or not browser_id.strip():
+            return 0
+        stmt = (
+            update(UserSession)
+            .where(
+                UserSession.user_id == user_id,
+                UserSession.browser_id == browser_id,
+                UserSession.session_id != except_session_id,
+                UserSession.is_active,
+            )
+            .values(
+                is_active=False, status="Superseded", revoked_at=clock.now(), revoked_by="System"
+            )
+        )
+        return self._session.execute(stmt).rowcount
 
     def revoke_session(self, session_id: UUID, reason: str) -> None:
         session_row = self._session.get(UserSession, session_id)
@@ -100,7 +124,7 @@ class SessionRepository:
             return
         session_row.is_active = False
         session_row.status = reason or "Revoked"
-        session_row.revoked_at = datetime.now()
+        session_row.revoked_at = clock.now()
         self._session.flush()
 
     def is_session_active(self, session_id: UUID) -> bool | None:
@@ -114,7 +138,7 @@ class SessionRepository:
     def find_active_by_session_id(self, session_id: UUID) -> UserSession | None:
         """Rama legado de ValidateTokenAsync: trata el propio SessionId como un
         "token opaco" cuando el string recibido no es un JWT valido."""
-        now = datetime.now()
+        now = clock.now()
         stmt = select(UserSession).where(
             UserSession.session_id == session_id,
             UserSession.is_active,
@@ -139,7 +163,7 @@ class SessionRepository:
         RevokeSessionAsync del panel de administracion."""
         session_row.is_active = False
         session_row.status = "Revoked"
-        session_row.revoked_at = datetime.now()
+        session_row.revoked_at = clock.now()
         session_row.revoked_by = revoked_by
         self._session.flush()
 
@@ -153,7 +177,7 @@ class SessionRepository:
             UserSession.user_id == user_id, UserSession.is_active
         )
         sessions = list(self._session.scalars(stmt))
-        now = datetime.now()
+        now = clock.now()
         for session_row in sessions:
             session_row.is_active = False
             session_row.status = "Revoked"
@@ -181,7 +205,7 @@ class SessionRepository:
                 ip_address=ip_address,
                 user_agent=user_agent,
                 reason=reason,
-                attempted_at=datetime.now(),
+                attempted_at=clock.now(),
             )
         )
         self._session.flush()

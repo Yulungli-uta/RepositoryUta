@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
+using WsSeguUta.AuthSystem.API.Utilities;
 
 namespace WsSeguUta.AuthSystem.API.Controllers;
 [ApiController]

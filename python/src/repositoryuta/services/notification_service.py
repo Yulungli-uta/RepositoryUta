@@ -3,12 +3,12 @@ import hmac
 import json
 import logging
 import time
-from datetime import datetime
 from uuid import UUID
 
 import requests
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.models.application import Application
 from repositoryuta.models.identity import User
 from repositoryuta.models.notification import NotificationLog, NotificationSubscription
@@ -270,7 +270,7 @@ def notify_login_event(
             "displayName": user.display_name,
             "loginType": login_type,
             "ipAddress": ip_address or "",
-            "loginTime": datetime.now().isoformat(),
+            "loginTime": clock.now().isoformat(),
             "roles": roles,
             "permissions": permissions,
             "pair": pair.model_dump(by_alias=True, mode="json") if pair else None,
@@ -289,7 +289,7 @@ def notify_logout_event(session: Session, user_id: UUID) -> None:
 
         event_data = {
             "userId": str(user_id), "email": user.email,
-            "logoutTime": datetime.now().isoformat(),
+            "logoutTime": clock.now().isoformat(),
         }
         _send_direct_notifications(session, "Logout", event_data)
         logger.info("Notificación de logout enviada para usuario %s", user_id)
@@ -334,7 +334,7 @@ def _prepare_login_event_data(
 
     return {
         "eventType": "Login",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": clock.now().isoformat(),
         "context": {
             "initiatingApplication": client_id,
             "loginSource": login_type,

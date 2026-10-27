@@ -1,11 +1,11 @@
 import logging
 import secrets
-from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
 from repositoryuta.config import get_settings
+from repositoryuta.core import clock
 from repositoryuta.core.exceptions import ConflictError
 from repositoryuta.core.pagination import PagedResult
 from repositoryuta.models.identity import (
@@ -59,8 +59,8 @@ def _update_status(
     record.provisioning_status_id = int(status)
     record.provisioning_status_name = _status_name(status)
     record.error_message = message
-    record.updated_at = datetime.now()
-    record.last_checked_at = datetime.now()
+    record.updated_at = clock.now()
+    record.last_checked_at = clock.now()
     session.commit()
 
 
@@ -290,7 +290,7 @@ def retry(
     record.provisioning_status_id = int(ProvisioningStatus.REQUESTED)
     record.provisioning_status_name = _status_name(ProvisioningStatus.REQUESTED)
     record.error_message = None
-    record.updated_at = datetime.now()
+    record.updated_at = clock.now()
     session.commit()
 
     _do_provision(session, record, req)
@@ -336,7 +336,7 @@ def _do_provision(
             return
 
         record.local_ad_object_id = created.id
-        record.provisioned_at = datetime.now()
+        record.provisioned_at = clock.now()
 
         if created.cn_warning:
             logger.warning(
@@ -513,7 +513,7 @@ def _ensure_user_employee(session: Session, user_id: UUID, email: str, hr_employ
             employee_email=email,
             hr_employee_id=hr_employee_id,
             is_active=True,
-            sync_date=datetime.now(),
+            sync_date=clock.now(),
             notes=f"Aprovisionado desde HrSystem (EmployeeId={hr_employee_id})",
         )
     )
@@ -581,8 +581,8 @@ def complete_pending(session: Session) -> CompletePendingResultRead:
 
 
 def _do_complete(session: Session, record: UserProvisioning) -> None:
-    record.last_checked_at = datetime.now()
-    record.updated_at = datetime.now()
+    record.last_checked_at = clock.now()
+    record.updated_at = clock.now()
 
     try:
         sync = azure_mgmt.check_user_entra_sync(record.email)
@@ -624,7 +624,7 @@ def _do_complete(session: Session, record: UserProvisioning) -> None:
 
     if license_result.success:
         record.license_sku_id = license_result.sku_part_number
-        record.license_assigned_at = datetime.now()
+        record.license_assigned_at = clock.now()
         record.provisioning_status_id = int(ProvisioningStatus.LICENSE_ASSIGNED)
         record.provisioning_status_name = _status_name(ProvisioningStatus.LICENSE_ASSIGNED)
         record.error_message = None
@@ -635,7 +635,7 @@ def _do_complete(session: Session, record: UserProvisioning) -> None:
         record.error_message = license_result.message
         logger.warning("Fallo al asignar licencia a %s: %s", record.email, license_result.message)
 
-    record.updated_at = datetime.now()
+    record.updated_at = clock.now()
     session.commit()
 
 
@@ -679,7 +679,7 @@ def reset_password(session: Session, provisioning_id: UUID) -> PasswordResetResu
         record.local_ad_object_id, new_password, force_password_change=True
     )
 
-    record.updated_at = datetime.now()
+    record.updated_at = clock.now()
     session.commit()
 
     logger.info(

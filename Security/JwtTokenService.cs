@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using WsSeguUta.AuthSystem.API.Data;
+using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Security
 {
@@ -22,13 +23,17 @@ namespace WsSeguUta.AuthSystem.API.Security
         private readonly IMemoryCache _cache;
         private readonly ILogger<JwtTokenService> _logger;
 
+        private readonly IAppClock _clock;
+
         public JwtTokenService(
             IConfiguration cfg,
             RsaKeyProvider keys,
             IServiceScopeFactory scopeFactory,
             IMemoryCache cache,
-            ILogger<JwtTokenService> logger)
+            ILogger<JwtTokenService> logger,
+            IAppClock clock)
         {
+            _clock = clock;
             _keys = keys;
             _scopeFactory = scopeFactory;
             _cache = cache;
@@ -71,7 +76,7 @@ namespace WsSeguUta.AuthSystem.API.Security
                 _issuer,
                 _audience,
                 claims,
-                expires: DateTime.Now.Add(effectiveLifetime),
+                expires: _clock.UtcNow.UtcDateTime.Add(effectiveLifetime),
                 signingCredentials: new SigningCredentials(_keys.SigningKey, SecurityAlgorithms.RsaSha256));
 
             return new JwtSecurityTokenHandler().WriteToken(token);
@@ -98,7 +103,7 @@ namespace WsSeguUta.AuthSystem.API.Security
                 _issuer,
                 _audience,
                 claims,
-                expires: DateTime.Now.Add(lifetime),
+                expires: _clock.UtcNow.UtcDateTime.Add(lifetime),
                 signingCredentials: new SigningCredentials(_keys.SigningKey, SecurityAlgorithms.RsaSha256));
 
             return Task.FromResult(new JwtSecurityTokenHandler().WriteToken(token));

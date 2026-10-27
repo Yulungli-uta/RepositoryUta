@@ -57,6 +57,11 @@ def get_current_user_id(authorization: str | None = Header(default=None)) -> UUI
     return _user_id_from_payload(payload)
 
 
+def get_current_payload(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Claims del token (firma/expiracion ya validadas), p. ej. "sid" y "role"."""
+    return _decode_bearer_payload(authorization)
+
+
 def get_current_user_email(authorization: str | None = Header(default=None)) -> str:
     """Espejo de GetCurrentUserEmail() (varios controllers): claim "email" del
     token, o "system" si no viene (ej. token de aplicacion)."""

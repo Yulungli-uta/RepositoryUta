@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from repositoryuta.config import get_settings
+from repositoryuta.core import clock
 from repositoryuta.core.security import jwt as jwt_core
 from repositoryuta.core.security.password import verify_password
 from repositoryuta.models.rbac import Permission, Role, RolePermission, UserRole
@@ -59,7 +60,7 @@ def authenticate_application(
         str(token_id), app.client_id, token_roles, _APP_TOKEN_LIFETIME_MINUTES
     )
 
-    now = datetime.now()
+    now = clock.now()
     app.last_used_at = now
     apps.log_legacy_auth(
         LegacyAuthLogCreate(
@@ -92,7 +93,7 @@ def _log_legacy_attempt(
     user_agent: str | None,
     start_time: datetime,
 ) -> None:
-    response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+    response_time_ms = int((clock.now() - start_time).total_seconds() * 1000)
     ApplicationRepository(session).log_legacy_auth(
         LegacyAuthLogCreate(
             application_id=application_id,
@@ -110,7 +111,7 @@ def _log_legacy_attempt(
 def _active_roles_and_permissions(
     session: Session, user_id: UUID
 ) -> tuple[list[LegacyRoleInfo], list[LegacyPermissionInfo]]:
-    now = datetime.now()
+    now = clock.now()
     active_user_roles = select(UserRole.role_id).where(
         UserRole.user_id == user_id,
         ~UserRole.is_deleted,
@@ -161,7 +162,7 @@ def authenticate_user_legacy(
     user_agent: str | None,
 ) -> LegacyAuthResponse:
     """Espejo de AppAuthService.AuthenticateUserLegacyAsync."""
-    start_time = datetime.now()
+    start_time = clock.now()
     apps = ApplicationRepository(session)
     app = apps.find_active_by_client_id(client_id)
     if app is None:
@@ -223,7 +224,7 @@ def authenticate_user_legacy(
 
         if not verify_password(password, credentials.password_hash):
             credentials.failed_attempts += 1
-            credentials.last_failed_attempt = datetime.now()
+            credentials.last_failed_attempt = clock.now()
             if credentials.failed_attempts >= MAX_FAILED_ATTEMPTS:
                 credentials.is_locked = True
             session.flush()
@@ -237,7 +238,7 @@ def authenticate_user_legacy(
         credentials.last_failed_attempt = None
         session.flush()
 
-    user.last_login = datetime.now()
+    user.last_login = clock.now()
     session.flush()
 
     response = LegacyAuthResponse(

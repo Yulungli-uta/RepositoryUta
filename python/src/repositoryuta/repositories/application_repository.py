@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.models.application import Application, LegacyAuthLog
 from repositoryuta.models.views import VwActiveApiClient
 from repositoryuta.schemas.application import LegacyAuthLogCreate
@@ -62,7 +63,7 @@ class ApplicationRepository:
         """Espejo del GroupBy de GetApplicationStatsAsync: (total, exitosos,
         ultimos 7 dias). Devuelve (0, 0, 0) si no hay filas, igual que el
         `logAgg?.Total ?? 0` del .NET."""
-        cutoff = datetime.now() - timedelta(days=7)
+        cutoff = clock.now() - timedelta(days=7)
         stmt = select(
             func.count(),
             func.sum(func.iif(LegacyAuthLog.auth_result == "Success", 1, 0)),

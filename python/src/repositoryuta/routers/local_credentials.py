@@ -3,9 +3,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.core.schema_base import dump
 from repositoryuta.models.identity import LocalUserCredential
-from repositoryuta.routers.dependencies import get_db_session, require_roles
+from repositoryuta.repositories.audit_repository import AuditRepository
+from repositoryuta.routers.dependencies import (
+    get_current_user_email,
+    get_db_session,
+    require_roles,
+)
+from repositoryuta.schemas.audit import AuditLogCreate
 from repositoryuta.schemas.common import ApiResponse
 from repositoryuta.schemas.identity import (
     LocalCredentialCreate,
@@ -44,6 +51,38 @@ def list_local_credentials(
             "totalCount": result.total_count,
         }
     )
+
+
+@router.post("/{user_id}/unlock")
+def unlock_local_credential(
+    user_id: UUID,
+    session: Session = Depends(get_db_session),
+    _actor_id: UUID = Depends(require_roles(*_ADMIN_ROLES)),
+    actor_email: str = Depends(get_current_user_email),
+) -> ApiResponse:
+    """Desbloquea una cuenta Local: reinicia los intentos fallidos y levanta el bloqueo. Queda en la
+    auditoria. Se usa este endpoint y no el PUT generico, que escribe los campos tal cual."""
+    cred = session.get(LocalUserCredential, user_id)
+    if cred is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No existe")
+
+    now = clock.now()
+    was_locked = bool(cred.is_locked or (cred.locked_until is not None and cred.locked_until > now))
+    cred.failed_attempts = 0
+    cred.is_locked = False
+    cred.locked_until = None
+
+    AuditRepository(session).log_action(
+        AuditLogCreate(
+            user_id=user_id,
+            action="AccountUnlocked",
+            module="Authentication",
+            entity_id=str(user_id),
+            old_values="Locked" if was_locked else "NotLocked",
+            new_values=f"UnlockedBy={actor_email}",
+        )
+    )
+    return ApiResponse.ok({"unlocked": True, "wasLocked": was_locked})
 
 
 @router.get("/{user_id}")

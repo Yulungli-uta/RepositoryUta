@@ -11,8 +11,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly AuthDbContext _context;
         private readonly ILogger<UserRegistrationService> _logger;
 
-        public UserRegistrationService(AuthDbContext context, ILogger<UserRegistrationService> logger)
+        private readonly IAppClock _clock;
+
+        public UserRegistrationService(AuthDbContext context, ILogger<UserRegistrationService> logger, IAppClock clock)
         {
+            _clock = clock;
             _context = context;
             _logger = logger;
         }
@@ -36,7 +39,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     DisplayName = dto.DisplayName,
                     UserType = dto.UserType,
                     IsActive = true,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = _clock.Now
                 };
 
                 _context.Users.Add(user);
@@ -56,7 +59,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     // se deja NULL en vez de 0 para no inventar un valor falso.
                     HrEmployeeId = dto.HrEmployeeId > 0 ? dto.HrEmployeeId : null,
                     IsActive = true,
-                    SyncDate = DateTime.Now,
+                    SyncDate = _clock.Now,
                     Notes = "Creado manualmente desde el panel de administración"
                 };
 

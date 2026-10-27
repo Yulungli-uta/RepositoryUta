@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.models.identity import SecurityToken
 
 
@@ -17,7 +18,7 @@ class SecurityTokenRepository:
     def invalidate_pending(self, user_id: UUID, token_type: str) -> None:
         """Invalida cualquier token pendiente previo del mismo tipo (espejo del
         bucle que marca IsUsed=true en RequestPasswordChange2FAAsync)."""
-        now = datetime.now()
+        now = clock.now()
         stmt = select(SecurityToken).where(
             SecurityToken.user_id == user_id,
             SecurityToken.token_type == token_type,
@@ -49,7 +50,7 @@ class SecurityTokenRepository:
         return row
 
     def find_valid(self, user_id: UUID, token_type: str, token_hash: str) -> SecurityToken | None:
-        now = datetime.now()
+        now = clock.now()
         stmt = select(SecurityToken).where(
             SecurityToken.user_id == user_id,
             SecurityToken.token_type == token_type,

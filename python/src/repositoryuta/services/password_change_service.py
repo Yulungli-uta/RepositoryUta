@@ -1,9 +1,10 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.core.security.password import hash_password, verify_password
 from repositoryuta.models.identity import LocalUserCredential, PasswordHistory
 from repositoryuta.repositories.security_token_repository import SecurityTokenRepository
@@ -49,7 +50,7 @@ def _apply_password_change(
 ) -> None:
     """Espejo de ApplyPasswordChangeAsync."""
     new_hash = hash_password(new_password)
-    now = datetime.now()
+    now = clock.now()
 
     cred.password_hash = new_hash
     cred.password_created_at = now
@@ -125,7 +126,7 @@ def request_password_change_2fa(
         user_id=user_id,
         token_type=OTP_TOKEN_TYPE,
         token_hash=token_service.hash_token(otp_code),
-        expires_at=datetime.now() + timedelta(minutes=OTP_TTL_MINUTES),
+        expires_at=clock.now() + timedelta(minutes=OTP_TTL_MINUTES),
         additional_data=str(user_id),
     )
 

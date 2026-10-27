@@ -131,3 +131,33 @@ def test_azure_exchange_missing_fields_returns_400(client) -> None:
         "/api/auth/azure/exchange", json={"deliveryCode": "", "codeVerifier": ""}
     )
     assert response.status_code == 400
+
+
+def test_azure_callback_without_code_returns_friendly_page_instead_of_422(client) -> None:
+    # Microsoft redirige sin "code" y con "error" cuando el usuario pulsa "Atras" o cancela
+    response = client.get(
+        "/api/auth/azure/callback",
+        params={"error": "access_denied", "error_description": "<script>alert(1)</script>"},
+    )
+
+    assert response.status_code == 200
+    assert "no se completó el inicio de sesión" in response.text.lower()
+    # No se refleja el error ni su descripcion en la pagina
+    assert "access_denied" not in response.text
+    assert "alert(1)" not in response.text
+
+
+def test_azure_callback_without_code_notifies_relay_when_configured(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from repositoryuta.config import get_settings
+
+    monkeypatch.setenv("AZURE_AD__FRONTEND_RELAY_URL", "https://front.example/auth/azure/relay")
+    get_settings.cache_clear()
+
+    response = client.get(
+        "/api/auth/azure/callback", params={"error": "access_denied"}, follow_redirects=False
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://front.example/auth/azure/relay?loginFailed=1"

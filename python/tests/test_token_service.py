@@ -1,5 +1,6 @@
 import hashlib
 
+from repositoryuta.config import get_settings
 from repositoryuta.models.app_param import AppParam
 from repositoryuta.services.token_service import (
     get_access_token_lifetime_minutes,

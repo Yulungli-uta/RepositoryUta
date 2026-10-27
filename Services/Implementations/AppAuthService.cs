@@ -18,8 +18,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly IMemoryCache _cache;
         private readonly IConfiguration _configuration;
 
-        public AppAuthService(AuthDbContext context, ITokenService tokenService, ILogger<AppAuthService> logger, IMemoryCache cache, IConfiguration configuration)
+        private readonly IAppClock _clock;
+
+        public AppAuthService(AuthDbContext context, ITokenService tokenService, ILogger<AppAuthService> logger, IMemoryCache cache, IConfiguration configuration, IAppClock clock)
         {
+            _clock = clock;
             _context = context;
             _tokenService = tokenService;
             _logger = logger;
@@ -52,12 +55,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 // solo para tokens de usuario). Se pasa explícitamente para que el claim `exp`
                 // real del JWT coincida siempre con el expiresAt devuelto al llamador.
                 var appTokenLifetime = TimeSpan.FromMinutes(60);
-                var expiresAt = DateTime.Now.Add(appTokenLifetime);
+                var expiresAt = _clock.Now.Add(appTokenLifetime);
                 var configuredRoles = _configuration.GetSection($"AppAuth:ClientRoles:{app.ClientId}").Get<string[]>();
                 var tokenRoles = configuredRoles is { Length: > 0 } ? configuredRoles : new[] { "Application" };
                 var token = await _tokenService.CreateAppTokenAsync(tokenId, app.ClientId, tokenRoles, appTokenLifetime);
 
-                app.LastUsedAt = DateTime.Now;
+                app.LastUsedAt = _clock.Now;
 
                 _context.LegacyAuthLogs.Add(new LegacyAuthLog
                 {
@@ -67,7 +70,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     AuthType      = "ClientCredentials",
                     IpAddress     = ipAddress ?? "",
                     UserAgent     = userAgent ?? "",
-                    CreatedAt     = DateTime.Now,
+                    CreatedAt     = _clock.Now,
                 });
                 await _context.SaveChangesAsync();
 
@@ -83,7 +86,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         public async Task<LegacyAuthResponse> AuthenticateUserLegacyAsync(string clientId, string clientSecret, string userEmail, string password, bool includePermissions, string? ipAddress, string? userAgent)
         {
-            var startTime = DateTime.Now;
+            var startTime = _clock.Now;
             Guid? applicationId = null;
             Guid? userId = null;
 
@@ -127,7 +130,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     if (!PasswordHasher.Verify(password, credentials.PasswordHash))
                     {
                         credentials.FailedAttempts++;
-                        credentials.LastFailedAttempt = DateTime.Now;
+                        credentials.LastFailedAttempt = _clock.Now;
                         if (credentials.FailedAttempts >= 5)
                             credentials.IsLocked = true;
                         await _context.SaveChangesAsync();
@@ -139,7 +142,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     await _context.SaveChangesAsync();
                 }
 
-                user.LastLogin = DateTime.Now;
+                user.LastLogin = _clock.Now;
                 await _context.SaveChangesAsync();
 
                 var response = new LegacyAuthResponse(true, "Authentication successful",
@@ -149,7 +152,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 {
                     var activeUserRoles = _context.UserRoles
                         .Where(ur => ur.UserId == user.Id && !ur.IsDeleted &&
-                                     (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.Now));
+                                     (ur.ExpiresAt == null || ur.ExpiresAt > _clock.Now));
 
                     var roles = await activeUserRoles
                         .Join(_context.Roles, ur => ur.RoleId, r => r.Id,
@@ -186,7 +189,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     return new ValidateTokenResponse(false, "Unknown", null, null, null, "Token is invalid or expired", null);
 
                 var userSession = await _context.UserSessions
-                    .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > DateTime.Now);
+                    .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > _clock.Now);
 
                 if (userSession != null)
                     return new ValidateTokenResponse(true, "User token", userSession.ExpiresAt, userSession.UserId, userSession.SessionId, "Token is valid", null);
@@ -209,7 +212,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
                 if (app == null) return null;
 
-                var cutoff7Days = DateTime.Now.AddDays(-7);
+                var cutoff7Days = _clock.Now.AddDays(-7);
                 var appId = app.Id;
                 var logAgg = await _context.LegacyAuthLogs
                     .Where(l => l.ApplicationId == appId)
@@ -271,7 +274,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     FailureReason = failureReason,
                     IpAddress = ipAddress,
                     UserAgent = userAgent,
-                    ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds
+                    ResponseTime = (int)(_clock.Now - startTime).TotalMilliseconds
                 });
                 await _context.SaveChangesAsync();
             }

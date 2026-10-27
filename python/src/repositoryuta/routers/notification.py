@@ -1,10 +1,10 @@
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.core.schema_base import dump
 from repositoryuta.routers.dependencies import get_current_user_id, get_db_session
 from repositoryuta.schemas.common import ApiResponse
@@ -113,6 +113,6 @@ def webhook_test(payload: Any = Body(default=None)) -> dict:
     return {
         "Status": "Success",
         "Message": "Webhook received successfully",
-        "Timestamp": datetime.now().isoformat(),
+        "Timestamp": clock.now().isoformat(),
         "ReceivedPayload": payload,
     }

@@ -16,6 +16,7 @@ dependencies = [
   "pyodbc==5.3.0",
   "slowapi==0.1.10",
   "sqlalchemy==2.0.52",
+  "tzdata==2026.5",
   "setuptools==84.0.0",
   "uvicorn[standard]==0.52.4",
 ]
@@ -41,7 +42,12 @@ target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# DTZ: prohíbe datetime.now()/today() sin zona (estándar "Fecha y hora UTA": usar repositoryuta.core.clock).
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "DTZ"]
+
+[tool.ruff.lint.per-file-ignores]
+# Las pruebas construyen datetimes naive a propósito (misma convención que las columnas datetime2).
+"tests/**" = ["DTZ"]
 
 [tool.ruff.lint.flake8-bugbear]
 # FastAPI usa Depends()/Header()/etc. como valor por defecto a proposito (es

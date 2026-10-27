@@ -1,10 +1,10 @@
 import base64
 import secrets
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.core.exceptions import NotFoundError
 from repositoryuta.repositories.application_repository import ApplicationRepository
 from repositoryuta.repositories.audit_repository import AuditRepository
@@ -113,7 +113,7 @@ def toggle_client(session: Session, application_id: UUID, changed_by: str) -> To
         raise NotFoundError(f"Aplicación {application_id} no encontrada.")
 
     app.is_active = not app.is_active
-    now = datetime.now()
+    now = clock.now()
     app.modified_at = now
     app.modified_by = changed_by
 
@@ -154,7 +154,7 @@ def rotate_secret(session: Session, application_id: UUID, rotated_by: str) -> Ro
         raise NotFoundError(f"Aplicación {application_id} no encontrada.")
 
     new_secret = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii").rstrip("=")
-    now = datetime.now()
+    now = clock.now()
 
     app.client_secret_hash = token_service.hash_token(new_secret)
     app.secret_rotated_at = now

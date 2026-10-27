@@ -1,6 +1,7 @@
 ﻿using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using WsSeguUta.AuthSystem.API.Models.Entities;
+using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Data.Repositories;
 
@@ -55,6 +56,12 @@ public interface IAuthRepository
     Task<int> RevokeAllActiveSessionsForUserAsync(Guid userId, string reason);
 
     Task RevokeSessionAsync(Guid sessionId, string reason);
+
+    /// <summary>
+    /// Cierra las demás sesiones activas del usuario en el MISMO navegador (browserId) al iniciar una nueva: comparten
+    /// tokens locales, así que las anteriores ya no se pueden usar y solo se acumulaban. Sin browserId no hace nada.
+    /// </summary>
+    Task<int> RevokeOtherBrowserSessionsAsync(Guid userId, string? browserId, Guid exceptSessionId);
     Task RecordFailedAttemptAsync(string email, string? ip, string? agent, string? reason);
     Task InsertLoginAsync(Guid? userId, string emailOrUser, bool ok, string type, string status, string? reason, Guid? sessionId, string? ip, string? agent, string? device);
 }
@@ -66,7 +73,12 @@ public interface IMenuRepository { Task<IEnumerable<object>> GetMenuByUserAsync(
 public class UserRepository : IUserRepository
 {
     private readonly AuthDbContext _db;
-    public UserRepository(AuthDbContext db) => _db = db;
+    private readonly IAppClock _clock;
+    public UserRepository(AuthDbContext db, IAppClock clock)
+    {
+        _db = db;
+        _clock = clock;
+    }
 
     public Task<User?> FindByEmailAsync(string email) => _db.Users.FirstOrDefaultAsync(u => u.Email == email);
     public Task<User?> FindByIdAsync(Guid id) => _db.Users.FirstOrDefaultAsync(u => u.Id == id);
@@ -79,7 +91,7 @@ public class UserRepository : IUserRepository
         var q = from ur in _db.UserRoles
                 join r in _db.Roles on ur.RoleId equals r.Id
                 where ur.UserId == userId && !ur.IsDeleted && r.IsActive && !r.IsDeleted
-                      && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.Now)
+                      && (ur.ExpiresAt == null || ur.ExpiresAt > _clock.Now)
                 select r.Name;
         return await q.ToArrayAsync();
     }
@@ -104,7 +116,12 @@ public class UserRepository : IUserRepository
 public class AuthRepository : IAuthRepository
 {
     private readonly AuthDbContext _db;
-    public AuthRepository(AuthDbContext db) => _db = db;
+    private readonly IAppClock _clock;
+    public AuthRepository(AuthDbContext db, IAppClock clock)
+    {
+        _db = db;
+        _clock = clock;
+    }
 
     public async Task<UserSession> CreateSessionAsync(Guid userId, string accessToken, string refreshHash, DateTime expiresAt, string? device, string? ip, string? userAgent = null, string? browserId = null, Guid? sessionId = null)
     {
@@ -113,9 +130,22 @@ public class AuthRepository : IAuthRepository
         _db.UserSessions.Add(s); await _db.SaveChangesAsync(); return s;
     }
 
+    public async Task<int> RevokeOtherBrowserSessionsAsync(Guid userId, string? browserId, Guid exceptSessionId)
+    {
+        if (string.IsNullOrWhiteSpace(browserId)) return 0;
+        var now = _clock.Now;
+        return await _db.UserSessions
+            .Where(s => s.UserId == userId && s.BrowserId == browserId && s.SessionId != exceptSessionId && s.IsActive)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(s => s.IsActive, false)
+                .SetProperty(s => s.Status, "Superseded")
+                .SetProperty(s => s.RevokedAt, now)
+                .SetProperty(s => s.RevokedBy, "System"));
+    }
+
     public async Task<(UserSession Sess, User User)?> GetActiveSessionByRefreshHashAsync(string refreshHash)
     {
-        var sess = await _db.UserSessions.FirstOrDefaultAsync(x => x.RefreshToken == refreshHash && x.IsActive && x.ExpiresAt > DateTime.Now);
+        var sess = await _db.UserSessions.FirstOrDefaultAsync(x => x.RefreshToken == refreshHash && x.IsActive && x.ExpiresAt > _clock.Now);
         if (sess is null) return null;
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == sess.UserId && x.IsActive);
         if (u is null) return null;
@@ -136,7 +166,7 @@ public class AuthRepository : IAuthRepository
             .ExecuteUpdateAsync(s => s
                 .SetProperty(x => x.IsActive, false)
                 .SetProperty(x => x.Status, reason)
-                .SetProperty(x => x.RevokedAt, DateTime.Now)
+                .SetProperty(x => x.RevokedAt, _clock.Now)
                 .SetProperty(x => x.RevokedBy, "System"));
     }
 
@@ -144,12 +174,12 @@ public class AuthRepository : IAuthRepository
     {
         var s = await _db.UserSessions.FirstOrDefaultAsync(x => x.SessionId == sessionId);
         if (s is null) return;
-        s.IsActive = false; s.Status = reason ?? "Revoked"; s.RevokedAt = DateTime.Now; await _db.SaveChangesAsync();
+        s.IsActive = false; s.Status = reason ?? "Revoked"; s.RevokedAt = _clock.Now; await _db.SaveChangesAsync();
     }
 
     public async Task RecordFailedAttemptAsync(string email, string? ip, string? agent, string? reason)
     {
-        _db.FailedLoginAttempts.Add(new FailedLoginAttempt { UserEmail = email, IpAddress = ip, UserAgent = agent, Reason = reason, AttemptedAt = DateTime.Now });
+        _db.FailedLoginAttempts.Add(new FailedLoginAttempt { UserEmail = email, IpAddress = ip, UserAgent = agent, Reason = reason, AttemptedAt = _clock.Now });
         await _db.SaveChangesAsync();
     }
 
@@ -159,7 +189,7 @@ public class AuthRepository : IAuthRepository
         _db.LoginHistory.Add(new LoginHistory {
           UserId = userId, LoginType = type, LoginStatus = status,
           FailureReason = reason, SessionId = sessionId, IpAddress = ip, UserAgent = agent, DeviceInfo = device,
-          LoginDateTime = DateTime.Now //.Now
+          LoginDateTime = _clock.Now
         });
         await _db.SaveChangesAsync();
     }
@@ -200,7 +230,12 @@ public interface IAzureAdRepository
 public class AzureAdRepository : IAzureAdRepository
 {
     private readonly AuthDbContext _db;
-    public AzureAdRepository(AuthDbContext db) => _db = db;
+    private readonly IAppClock _clock;
+    public AzureAdRepository(AuthDbContext db, IAppClock clock)
+    {
+        _db = db;
+        _clock = clock;
+    }
     
     public Task<User?> FindByAzureIdAsync(Guid azureObjectId) 
         => _db.Users.FirstOrDefaultAsync(u => u.AzureObjectId == azureObjectId);
@@ -220,7 +255,7 @@ public class AzureAdRepository : IAzureAdRepository
                 AzureObjectId = Guid.Parse(azureObjectId),
                 UserType = "AzureAD",
                 IsActive = true,
-                CreatedAt = DateTime.Now
+                CreatedAt = _clock.Now
             };
             _db.Users.Add(user);
         }
@@ -242,7 +277,7 @@ public class AzureAdRepository : IAzureAdRepository
         await _db.AzureSyncLogs.AddAsync(new AzureSyncLog
         {
             SyncType = syncType,
-            SyncDate = DateTime.Now,
+            SyncDate = _clock.Now,
             RecordsProcessed = processed,
             NewUsers = created,
             UpdatedUsers = updated,

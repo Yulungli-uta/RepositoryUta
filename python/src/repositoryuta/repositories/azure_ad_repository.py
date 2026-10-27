@@ -1,9 +1,9 @@
-from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.models.audit import AzureSyncLog
 from repositoryuta.models.identity import User
 
@@ -31,7 +31,7 @@ class AzureAdRepository:
                 azure_object_id=azure_guid,
                 user_type="AzureAD",
                 is_active=True,
-                created_at=datetime.now(),
+                created_at=clock.now(),
             )
             self._session.add(user)
         else:

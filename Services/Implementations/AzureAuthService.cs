@@ -24,6 +24,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly IIdentityProviderResolver _identityResolver;
         private readonly ILogger<AzureAuthService> _logger;
 
+        private readonly IAppClock _clock;
+
         public AzureAuthService(
             IConfidentialClientApplication msal,
             IConfiguration cfg,
@@ -35,8 +37,10 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             INotificationService notificationService,
             IClientApplicationService clientApplicationService,
             IIdentityProviderResolver identityResolver,
-            ILogger<AzureAuthService> logger)
+            ILogger<AzureAuthService> logger,
+            IAppClock clock)
         {
+            _clock = clock;
             _msal = msal;
             _cfg = cfg;
             _http = http;
@@ -78,7 +82,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 // Viaja codificado dentro del propio "state" de OAuth: Microsoft lo devuelve
                 // intacto en el callback, así que no hace falta guardarlo aparte en caché.
                 codeChallenge,
-                timestamp = DateTime.Now.ToString("O"),
+                timestamp = _clock.Now.ToString("O"),
                 source = "azure_auth"
             };
 
@@ -181,9 +185,22 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var access = await _tokens.CreateAsync(user.Id, email, roles, adGroups, hrEmployeeId, sessionId: newSessionId);
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
-            var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, DateTime.Now.AddDays(7), deviceInfo, ipAddress, userAgent, browserId, sessionId: newSessionId);
+            var session = await _auth.CreateSessionAsync(user.Id, access, refreshHash, _clock.Now.AddDays(7), deviceInfo, ipAddress, userAgent, browserId, sessionId: newSessionId);
 
-            await _users.SetLastLoginAsync(user.Id, DateTime.Now);
+            // Cierra las sesiones anteriores del mismo navegador (interruptor: Security:SupersedeBrowserSessions)
+            if (_cfg.GetValue("Security:SupersedeBrowserSessions", true))
+            {
+                try
+                {
+                    await _auth.RevokeOtherBrowserSessionsAsync(user.Id, browserId, session.SessionId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "No se pudieron cerrar las sesiones previas del navegador. UserId: {UserId}", user.Id);
+                }
+            }
+
+            await _users.SetLastLoginAsync(user.Id, _clock.Now);
             await _auth.InsertLoginAsync(user.Id, email, true, "AzureAD", "Success", null, session.SessionId, ipAddress, userAgent, deviceInfo);
 
             return new TokenPair(access, refresh);

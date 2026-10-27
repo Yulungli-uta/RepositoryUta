@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.models.identity import (
     LocalUserCredential,
     PasswordHistory,
@@ -52,7 +53,7 @@ class UserRepository:
         tiene el filtro automatico alla, para no depender de un comportamiento
         implicito que en Python no existe.
         """
-        now = datetime.now()
+        now = clock.now()
         stmt = (
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)

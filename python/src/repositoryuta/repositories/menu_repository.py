@@ -1,9 +1,9 @@
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
 
+from repositoryuta.core import clock
 from repositoryuta.models.rbac import MenuItem, RoleMenuItem, UserRole
 from repositoryuta.schemas.rbac import MenuNode
 
@@ -24,7 +24,7 @@ class MenuRepository:
         self._session = session
 
     def get_menu_by_user(self, user_id: UUID) -> list[MenuNode]:
-        now = datetime.now()
+        now = clock.now()
 
         base_query = (
             select(

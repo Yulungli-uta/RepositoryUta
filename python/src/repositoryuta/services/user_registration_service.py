@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.core.exceptions import ConflictError
 from repositoryuta.models.identity import User, UserEmployee
 from repositoryuta.repositories.user_repository import UserRepository
@@ -46,7 +46,7 @@ def create_user_with_employee(session: Session, data: UserCreate) -> tuple[User,
         display_name=data.display_name,
         user_type=data.user_type,
         is_active=True,
-        created_at=datetime.now(),
+        created_at=clock.now(),
     )
     session.add(user)
     session.flush()
@@ -56,7 +56,7 @@ def create_user_with_employee(session: Session, data: UserCreate) -> tuple[User,
         employee_email=email,
         hr_employee_id=data.hr_employee_id if data.hr_employee_id > 0 else None,
         is_active=True,
-        sync_date=datetime.now(),
+        sync_date=clock.now(),
         notes="Creado manualmente desde el panel de administracion",
     )
     session.add(user_employee)

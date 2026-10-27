@@ -14,6 +14,12 @@ class RefreshRequest(ApiModel):
     refresh_token: str
 
 
+class LogoutRequest(RefreshRequest):
+    """Cierre de sesión; `reason` es opcional y solo se acepta de una lista cerrada."""
+
+    reason: str | None = None
+
+
 class TokenPair(ApiModel):
     access_token: str
     refresh_token: str

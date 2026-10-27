@@ -3,7 +3,6 @@ import re
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -11,6 +10,7 @@ from uuid import UUID
 import requests
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.repositories.audit_repository import AuditRepository
 from repositoryuta.repositories.azure_ad_repository import AzureAdRepository
 from repositoryuta.schemas.audit import AuditLogCreate
@@ -948,7 +948,7 @@ def sync_user_to_local_db(session: Session, azure_object_id: str) -> SyncResultR
             return SyncResultRead(
                 success=False, users_processed=0, users_created=0, users_updated=0,
                 users_failed=1, groups_processed=0, groups_created=0, groups_updated=0,
-                errors=errors, sync_date_time=datetime.now(),
+                errors=errors, sync_date_time=clock.now(),
                 duration_seconds=time.monotonic() - start,
             )
 
@@ -969,7 +969,7 @@ def sync_user_to_local_db(session: Session, azure_object_id: str) -> SyncResultR
         return SyncResultRead(
             success=True, users_processed=1, users_created=1 if is_new else 0,
             users_updated=0 if is_new else 1, users_failed=0, groups_processed=0,
-            groups_created=0, groups_updated=0, errors=errors, sync_date_time=datetime.now(),
+            groups_created=0, groups_updated=0, errors=errors, sync_date_time=clock.now(),
             duration_seconds=time.monotonic() - start,
         )
     except Exception as exc:
@@ -977,7 +977,7 @@ def sync_user_to_local_db(session: Session, azure_object_id: str) -> SyncResultR
         return SyncResultRead(
             success=False, users_processed=0, users_created=0, users_updated=0,
             users_failed=1, groups_processed=0, groups_created=0, groups_updated=0,
-            errors=errors, sync_date_time=datetime.now(), duration_seconds=time.monotonic() - start,
+            errors=errors, sync_date_time=clock.now(), duration_seconds=time.monotonic() - start,
         )
 
 

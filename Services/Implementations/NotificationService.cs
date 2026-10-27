@@ -17,12 +17,16 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly ILogger<NotificationService> _logger;
         private readonly IHubContext<NotificationHub>? _hubContext;
 
+        private readonly IAppClock _clock;
+
         public NotificationService(
             AuthDbContext context,
             IHttpClientFactory httpClientFactory,
             ILogger<NotificationService> logger,
+            IAppClock clock,
             IHubContext<NotificationHub>? hubContext = null)
         {
+            _clock = clock;
             _context = context;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
@@ -96,6 +100,26 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 .ToListAsync();
         }
 
+        public async Task NotifyLoginFailedAsync(string clientId, string browserId)
+        {
+            try
+            {
+                if (_hubContext is null || string.IsNullOrWhiteSpace(browserId)) return;
+
+                await _hubContext.Clients.Group($"browser_{browserId}").SendAsync("LoginNotification", new
+                {
+                    eventType = "LoginFailed",
+                    timestamp = _clock.Now,
+                    context = new { initiatingApplication = clientId, loginSource = "Office365" }
+                });
+            }
+            catch (Exception ex)
+            {
+                // Avisar a la pestaña es una cortesía: si falla, la pestaña conserva su propio tiempo de espera
+                _logger.LogError(ex, "No se pudo avisar el login fallido a {ClientId}", clientId);
+            }
+        }
+
         public async Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair, string browserId, string? deliveryCode = null)
         {
             try
@@ -153,7 +177,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 if (user == null) return;
 
                 var eventData = new LoginEventData(userId, user.Email, user.DisplayName ?? "",
-                    loginType, ipAddress ?? "", DateTime.Now, roles, permissions, pair: pair);
+                    loginType, ipAddress ?? "", _clock.Now, roles, permissions, pair: pair);
 
                 await SendDirectNotificationsAsync("Login", eventData);
                 _logger.LogInformation("Notificación de login enviada para usuario {UserId}", userId);
@@ -171,7 +195,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 var user = await _context.Users.FindAsync(userId);
                 if (user == null) return;
 
-                var eventData = new LogoutEventData(userId, user.Email, DateTime.Now);
+                var eventData = new LogoutEventData(userId, user.Email, _clock.Now);
                 await SendDirectNotificationsAsync("Logout", eventData);
                 _logger.LogInformation("Notificación de logout enviada para usuario {UserId}", userId);
             }
@@ -258,7 +282,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 return new
                 {
                     eventType = "Login",
-                    timestamp = DateTime.Now,
+                    timestamp = _clock.Now,
                     context = new
                     {
                         initiatingApplication = clientId,
@@ -298,7 +322,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         private async Task SendWebSocketNotificationAsync(NotificationSubscription subscription, object eventData, string clientId, string browserId)
         {
-            var startTime = DateTime.Now;
+            var startTime = _clock.Now;
             try
             {
                 if (_hubContext != null)
@@ -315,8 +339,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     HttpStatusCode = 200,
                     ResponseBody = "delivered",
                     IsSuccess = true,
-                    ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
-                    CreatedAt = DateTime.Now
+                    ResponseTime = (int)(_clock.Now - startTime).TotalMilliseconds,
+                    CreatedAt = _clock.Now
                 });
                 await _context.SaveChangesAsync();
 
@@ -331,9 +355,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     WebhookUrl = string.IsNullOrEmpty(browserId) ? $"websocket://app_{clientId}" : $"websocket://browser_{browserId}",
                     HttpStatusCode = 0,
                     IsSuccess = false,
-                    ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
+                    ResponseTime = (int)(_clock.Now - startTime).TotalMilliseconds,
                     ErrorMessage = ex.Message,
-                    CreatedAt = DateTime.Now
+                    CreatedAt = _clock.Now
                 });
                 await _context.SaveChangesAsync();
                 _logger.LogError(ex, "Error al enviar notificación WebSocket a {ClientId}", clientId);
@@ -359,7 +383,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         private async Task SendWebhookAsync(NotificationSubscription subscription, object eventData)
         {
-            var startTime = DateTime.Now;
+            var startTime = _clock.Now;
             var httpClient = _httpClientFactory.CreateClient();
 
             try
@@ -382,7 +406,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     HttpStatusCode = (int)response.StatusCode,
                     ResponseBody = responseBody,
                     IsSuccess = response.IsSuccessStatusCode,
-                    ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
+                    ResponseTime = (int)(_clock.Now - startTime).TotalMilliseconds,
                     ErrorMessage = response.IsSuccessStatusCode ? null : $"HTTP {response.StatusCode}: {responseBody}"
                 });
                 await _context.SaveChangesAsync();
@@ -398,7 +422,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     WebhookUrl = subscription.WebhookUrl,
                     HttpStatusCode = 0,
                     IsSuccess = false,
-                    ResponseTime = (int)(DateTime.Now - startTime).TotalMilliseconds,
+                    ResponseTime = (int)(_clock.Now - startTime).TotalMilliseconds,
                     ErrorMessage = ex.Message
                 });
                 await _context.SaveChangesAsync();

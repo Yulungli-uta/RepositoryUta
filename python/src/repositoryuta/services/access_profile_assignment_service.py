@@ -1,10 +1,10 @@
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.core.exceptions import NotFoundError
 from repositoryuta.models.access_profile import AccessProfile, AccessProfileRole, UserAccessProfile
 from repositoryuta.models.rbac import UserRole
@@ -71,7 +71,7 @@ def assign(
         session.flush()
     elif existing_assignment.is_deleted:
         existing_assignment.is_deleted = False
-        existing_assignment.assigned_at = datetime.now()
+        existing_assignment.assigned_at = clock.now()
         existing_assignment.assigned_by = assigned_by
         session.flush()
 

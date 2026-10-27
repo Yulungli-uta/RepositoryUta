@@ -1,5 +1,7 @@
+
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.models.audit import (
     AuditLog,
     LoginHistory,
@@ -32,7 +34,9 @@ class AuditRepository:
         return row
 
     def insert_login(self, data: LoginHistoryCreate) -> LoginHistory:
-        row = LoginHistory(**data.model_dump())
+        # Hora local, igual que el .NET (DateTime.Now): el default de BD es UTC y mezclaria
+        # horas distintas en una misma tabla con las sesiones y con lo que escribe el .NET
+        row = LoginHistory(**data.model_dump(), login_date_time=clock.now())
         self._session.add(row)
         self._session.flush()
         return row
