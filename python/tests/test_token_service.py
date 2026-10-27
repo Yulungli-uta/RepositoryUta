@@ -10,7 +10,8 @@ from repositoryuta.services.token_service import (
 
 
 def test_falls_back_to_settings_when_param_is_missing(sqlite_session) -> None:
-    assert get_access_token_lifetime_minutes(sqlite_session) == 30
+    default = get_settings().jwt.access_token_lifetime_minutes
+    assert get_access_token_lifetime_minutes(sqlite_session) == default
 
 
 def test_reads_the_value_from_app_params(sqlite_session) -> None:
@@ -24,7 +25,8 @@ def test_falls_back_when_value_is_not_a_valid_integer(sqlite_session) -> None:
     sqlite_session.add(AppParam(nemonic="Jwt:AccessTokenLifetimeMinutes", value="not-a-number"))
     sqlite_session.flush()
 
-    assert get_access_token_lifetime_minutes(sqlite_session) == 30
+    default = get_settings().jwt.access_token_lifetime_minutes
+    assert get_access_token_lifetime_minutes(sqlite_session) == default
 
 
 def test_result_is_cached_until_reset(sqlite_session) -> None:
