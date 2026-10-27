@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
+using WsSeguUta.AuthSystem.API.Utilities;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Infrastructure.Identity.Contracts;
 using System.Net;
@@ -20,6 +21,8 @@ public class AuthController : ControllerBase
     private readonly IAzureManagementService _azureMgmt;
     private readonly IUserRepository _users;
     private readonly INotificationService _notificationService;
+    private readonly IWebSocketConnectionService _wsConnections;
+    private readonly IUserActivityService _activity;
     private readonly IIdentityProviderResolver _identityResolver;
     private readonly IConfiguration _cfg;
     private readonly ILogger<AuthController> _logger;
@@ -30,6 +33,8 @@ public class AuthController : ControllerBase
         IAzureManagementService azureMgmt,
         IUserRepository users,
         INotificationService notificationService,
+        IWebSocketConnectionService wsConnections,
+        IUserActivityService activity,
         IIdentityProviderResolver identityResolver,
         IConfiguration cfg,
         ILogger<AuthController> logger)
@@ -39,6 +44,8 @@ public class AuthController : ControllerBase
         _azureMgmt = azureMgmt;
         _users = users;
         _notificationService = notificationService;
+        _wsConnections = wsConnections;
+        _activity = activity;
         _identityResolver = identityResolver;
         _cfg = cfg;
         _logger = logger;
@@ -73,12 +80,12 @@ public class AuthController : ControllerBase
     /// </summary>
     [HttpPost("logout")]
     [AllowAnonymous]
-    public async Task<IActionResult> Logout([FromBody] RefreshRequest req)
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.RefreshToken))
             return BadRequest(ApiResponse.Fail("Refresh token requerido"));
 
-        await _auth.LogoutAsync(req.RefreshToken);
+        await _auth.LogoutAsync(req.RefreshToken, req.Reason);
         return Ok(ApiResponse.Ok(true, "Sesión cerrada"));
     }
 
@@ -156,7 +163,10 @@ public class AuthController : ControllerBase
 
     [HttpGet("azure/callback")]
     [AllowAnonymous]
-    public async Task<IActionResult> AzureCallback([FromQuery] string code, [FromQuery] string state)
+    public async Task<IActionResult> AzureCallback(
+        [FromQuery] string? code = null,
+        [FromQuery] string? state = null,
+        [FromQuery] string? error = null)
     {
         //Console.WriteLine($"*******************Azure callback received. Code: {code}, State: {state}");
         // Obtener IP del cliente
@@ -184,6 +194,22 @@ public class AuthController : ControllerBase
         {
             //Console.WriteLine($"****************Error decoding state: {ex.Message}. Proceeding without clientId.");
         }
+        // Microsoft redirige aquí SIN "code" y con "error" cuando el usuario pulsa "Atrás", cancela o rechaza
+        // el acceso: no es una falla del servidor. Se avisa a la pestaña que espera y se cierra la ventana con
+        // un mensaje genérico (no se refleja ni el error ni su descripción en la página).
+        if (!string.IsNullOrWhiteSpace(error) || string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+        {
+            _logger.LogWarning(
+                "[AZURE-LOGIN] Inicio de sesión no completado en Microsoft (error={Error}). ClientId={ClientId}, BrowserId={BrowserId}",
+                string.IsNullOrWhiteSpace(error) ? "sin_code" : error, clientId, browserId);
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId);
+            return Content(
+                "<html><body><h3>Inicio de sesión no completado</h3><p>No se completó el inicio de sesión con Microsoft. " +
+                "Puedes cerrar esta ventana e intentarlo de nuevo.</p><script>setTimeout(()=>window.close(),1500);</script></body></html>",
+                "text/html");
+        }
+
         // Interruptor operativo: permite revertir al instante (sin recompilar) al reparto
         // directo de tokens por WebSocket si el flujo PKCE presentara algún problema en
         // producción. Default true si la clave falta o no es parseable — el valor real
@@ -315,6 +341,13 @@ public class AuthController : ControllerBase
                         // Intentar convertir a GUID si es posible, sino usar como string
                         if (Guid.TryParse(foundUserId, out var userId))
                         {
+                            // Si la pestaña que inició el login ya no tiene su conexión en tiempo real, la confirmación
+                            // no le llegará y el usuario se queda esperando: se deja constancia para dar seguimiento
+                            if (!string.IsNullOrEmpty(browserId) && !await _wsConnections.HasActiveBrowserConnectionAsync(browserId))
+                            {
+                                await _activity.LogAsync(userId, UserActivityCodes.LoginNotificationNoListener,
+                                    new { clientId, browserId }, null, clientIp, userAgent);
+                            }
                             if (!string.IsNullOrEmpty(clientId))
                             {
                                 //Console.WriteLine($"*************Notifying specific application: {clientId}");
@@ -594,24 +627,7 @@ public class AuthController : ControllerBase
         }
     }
 
-    private string? GetClientIp()
-    {
-        // Si estás detrás de proxy / gateway, esto suele venir poblado
-        var xff = Request.Headers["X-Forwarded-For"].ToString();
-        if (!string.IsNullOrWhiteSpace(xff))
-            return xff.Split(',')[0].Trim();
-
-        var xRealIp = Request.Headers["X-Real-IP"].ToString();
-        if (!string.IsNullOrWhiteSpace(xRealIp))
-            return xRealIp.Trim();
-
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-        // Normaliza loopback IPv6 a 127.0.0.1 (útil en dev)
-        if (ip == "::1") return "127.0.0.1";
-
-        return ip;
-    }
+    private string? GetClientIp() => ClientRequestInfo.GetClientIp(HttpContext);
 
     private string? GetUserAgent()
         => Request.Headers["User-Agent"].ToString();

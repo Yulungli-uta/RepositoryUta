@@ -8,6 +8,8 @@ public record AzureAuthUrlRequest(string? ClientId = null, string? BrowserId = n
 
 public record LoginRequest(string Email, string Password, string? BrowserId = null);
 public record RefreshRequest(string RefreshToken);
+/// <summary>Cierre de sesión; Reason es opcional y solo se acepta de una lista cerrada (ver UserActivityCodes).</summary>
+public record LogoutRequest(string RefreshToken, string? Reason = null);
 public record TokenPair(string AccessToken, string RefreshToken);
 
 /// <summary>

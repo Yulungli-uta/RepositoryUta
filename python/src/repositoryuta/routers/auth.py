@@ -15,6 +15,7 @@ from repositoryuta.schemas.auth import (
     AzureAuthUrlRequest,
     AzureExchangeRequest,
     LoginRequest,
+    LogoutRequest,
     RefreshRequest,
     ValidateTokenRequest,
 )
@@ -56,18 +57,21 @@ def login(
 def refresh(body: RefreshRequest, session: Session = Depends(get_db_session)) -> ApiResponse:
     pair = auth_service.refresh(session, body.refresh_token)
     if pair is None:
+        # get_db_session hace rollback ante cualquier excepción: se confirma antes para no perder
+        # el registro del rechazo ni las revocaciones por reuso de token hechas en esta petición
+        session.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Refresh token inválido")
     return ApiResponse.ok(dump(pair))
 
 
 @router.post("/logout")
-def logout(body: RefreshRequest, session: Session = Depends(get_db_session)) -> ApiResponse:
+def logout(body: LogoutRequest, session: Session = Depends(get_db_session)) -> ApiResponse:
     """Idempotente y sin revelar si el token era valido — igual que en .NET,
     LogoutAsync ya se comporta asi (siempre exito salvo body vacio)."""
     if not body.refresh_token or not body.refresh_token.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Refresh token requerido")
 
-    auth_service.logout(session, body.refresh_token)
+    auth_service.logout(session, body.refresh_token, body.reason)
     return ApiResponse.ok(True, "Sesión cerrada")
 
 
@@ -272,9 +276,31 @@ def _delivery_popup_html(payload: dict) -> str:
 
 @router.get("/azure/callback", response_model=None)
 def azure_callback(
-    request: Request, code: str, state: str, session: Session = Depends(get_db_session)
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    session: Session = Depends(get_db_session),
 ) -> HTMLResponse | RedirectResponse:
     settings = get_settings().azure_ad
+
+    # Microsoft redirige aqui SIN "code" y con "error" cuando el usuario pulsa "Atras", cancela o
+    # rechaza el acceso: no es una falla del servidor. Antes FastAPI respondia 422 con JSON crudo.
+    # No se refleja ni el error ni su descripcion en la pagina.
+    if error or not code or not state:
+        logger.warning(
+            "[AZURE-LOGIN] Inicio de sesion no completado en Microsoft (error=%s)",
+            error or "sin_code",
+        )
+        if settings.frontend_relay_url:
+            return RedirectResponse(f"{settings.frontend_relay_url}?loginFailed=1", status_code=302)
+        return HTMLResponse(
+            _closing_popup_html(
+                "No se completó el inicio de sesión con Microsoft. "
+                "Puedes cerrar esta ventana e intentarlo de nuevo."
+            )
+        )
+
     try:
         if settings.secure_token_delivery:
             pair, delivery_code = azure_auth_service.complete_login_and_issue_delivery_code(

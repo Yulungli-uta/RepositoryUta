@@ -8,9 +8,11 @@ import jwt as pyjwt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from repositoryuta.core import clock
 from repositoryuta.core.security import jwt as jwt_core
 from repositoryuta.core.security.password import verify_password
 from repositoryuta.models.rbac import Permission, Role, RolePermission
+from repositoryuta.models.session import UserSession
 from repositoryuta.repositories.access_profile_repository import AccessProfileRepository
 from repositoryuta.repositories.application_repository import ApplicationRepository
 from repositoryuta.repositories.audit_repository import AuditRepository
@@ -18,7 +20,7 @@ from repositoryuta.repositories.session_repository import SessionRepository
 from repositoryuta.repositories.user_repository import UserRepository
 from repositoryuta.schemas.audit import LoginHistoryCreate
 from repositoryuta.schemas.auth import MeResponse, TokenPair, ValidateTokenResponse
-from repositoryuta.services import local_ad_service, token_service
+from repositoryuta.services import activity_log_service, local_ad_service, token_service
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ def login_local(
     """Espejo de AuthService.LoginLocalAsync — mismo orden de validaciones,
     mismos umbrales (5 intentos, bloqueo 30 min, sesion 7 dias).
     """
-    now = datetime.now()
+    now = clock.now()
     users = UserRepository(session)
     sessions = SessionRepository(session)
 
@@ -96,6 +98,8 @@ def login_local(
         _log_failed(user.id, "Failed", "No credentials")
         return None
 
+    # El bloqueo por 5 intentos fallidos NO se levanta solo: lo quita un administrador con el boton
+    # "Desbloquear" (POST api/local-credentials/{id}/unlock). locked_until queda como referencia.
     if cred.is_locked or (cred.locked_until is not None and cred.locked_until > now):
         _log_failed(user.id, "Blocked", "Locked account")
         return None
@@ -145,6 +149,7 @@ def login_local(
         browser_id=browser_id,
         session_id=new_session_id,
     )
+    supersede_previous_browser_sessions(sessions, user.id, browser_id, session_row.session_id)
     users.set_last_login(user.id, now)
 
     AuditRepository(session).insert_login(
@@ -173,6 +178,7 @@ def refresh(session: Session, refresh_token: str) -> TokenPair | None:
     found = sessions.get_active_session_by_refresh_hash(refresh_hash)
     if found is None:
         _detect_refresh_token_reuse(session, refresh_hash)
+        _log_refresh_rejected(session, refresh_hash)
         return None
 
     old_session, user = found
@@ -191,7 +197,7 @@ def refresh(session: Session, refresh_token: str) -> TokenPair | None:
     )
     new_refresh_token = _generate_refresh_token()
     new_hash = token_service.hash_token(new_refresh_token)
-    new_expiry = datetime.now() + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
+    new_expiry = clock.now() + timedelta(days=REFRESH_TOKEN_TTL_DAYS)
 
     sessions.revoke_session(old_session.session_id, "Rotated")
     sessions.create_session(
@@ -225,7 +231,7 @@ def _detect_refresh_token_reuse(session: Session, refresh_hash: str) -> None:
         if rotated.revoked_at is None:
             return
 
-        if datetime.now() - rotated.revoked_at <= timedelta(seconds=REFRESH_REUSE_GRACE_SECONDS):
+        if clock.now() - rotated.revoked_at <= timedelta(seconds=REFRESH_REUSE_GRACE_SECONDS):
             return  # ventana de gracia para refresh concurrentes legitimos
 
         revoked_count = sessions.revoke_all_active_sessions_for_user(
@@ -255,7 +261,56 @@ def _detect_refresh_token_reuse(session: Session, refresh_hash: str) -> None:
         logger.exception("Error en la deteccion de reuso de refresh token")
 
 
-def logout(session: Session, refresh_token: str) -> bool:
+def _log_refresh_rejected(session: Session, refresh_hash: str) -> None:
+    """Deja constancia de una renovación rechazada cuando se puede identificar al usuario
+    (sesión vencida o usuario inactivo). Los tokens desconocidos o ya rotados no se registran
+    aquí: los rotados los cubre la detección de reuso. El motivo NO se devuelve al cliente.
+
+    commit=True: el router responde 401 a continuación y get_db_session hace rollback ante
+    cualquier excepción, lo que perdería este registro (y las revocaciones por reuso).
+    """
+    try:
+        found = session.scalar(
+            select(UserSession).where(
+                UserSession.refresh_token == refresh_hash,
+                UserSession.is_active | (UserSession.status == "Expired"),
+            )
+        )
+        if found is None:
+            return
+        reason = "EXPIRED" if found.expires_at <= clock.now() else "USER_INACTIVE"
+        activity_log_service.log_activity(
+            session,
+            found.user_id,
+            activity_log_service.REFRESH_REJECTED,
+            {"reason": reason},
+            session_id=found.session_id,
+            ip_address=found.ip_address,
+            user_agent=found.user_agent,
+            commit=True,
+        )
+    except Exception:
+        logger.exception("Error registrando la renovación rechazada")
+
+
+def supersede_previous_browser_sessions(
+    sessions: SessionRepository, user_id: UUID, browser_id: str | None, current_session_id: UUID
+) -> None:
+    """Al iniciar sesion cierra las sesiones anteriores del mismo navegador (se desactiva con
+    SUPERSEDE_BROWSER_SESSIONS=false). Best-effort: un fallo aqui nunca impide el login."""
+    from repositoryuta.config import get_settings
+
+    if not get_settings().supersede_browser_sessions:
+        return
+    try:
+        closed = sessions.revoke_other_browser_sessions(user_id, browser_id, current_session_id)
+        if closed:
+            logger.info("Sesiones previas del mismo navegador cerradas: %s", closed)
+    except Exception:
+        logger.exception("No se pudieron cerrar las sesiones previas del navegador")
+
+
+def logout(session: Session, refresh_token: str, reason: str | None = None) -> bool:
     """Espejo de AuthService.LogoutAsync — idempotente: si no encuentra la
     sesion, igual retorna exito."""
     sessions = SessionRepository(session)
@@ -265,6 +320,18 @@ def logout(session: Session, refresh_token: str) -> bool:
         return True
     session_row, _ = found
     sessions.revoke_session(session_row.session_id, "Logout")
+
+    # El motivo solo se registra si está en la lista cerrada (el cliente no escribe texto libre)
+    if reason is not None and reason in activity_log_service.ALLOWED_LOGOUT_REASONS:
+        activity_log_service.log_activity(
+            session,
+            session_row.user_id,
+            activity_log_service.SESSION_RESET_AUTO,
+            {"reason": reason},
+            session_id=session_row.session_id,
+            ip_address=session_row.ip_address,
+            user_agent=session_row.user_agent,
+        )
     return True
 
 

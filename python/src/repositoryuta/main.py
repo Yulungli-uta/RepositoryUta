@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,7 @@ from repositoryuta.config import get_settings
 from repositoryuta.core.exceptions import register_exception_handlers
 from repositoryuta.core.openapi_security import install_bearer_auth_docs
 from repositoryuta.core.rate_limit import limiter
-from repositoryuta.database import dispose_engine
+from repositoryuta.database import dispose_engine, get_session_factory
 from repositoryuta.logging import configure_logging
 from repositoryuta.middleware import (
     CorrelationIdMiddleware,
@@ -49,17 +50,31 @@ from repositoryuta.routers.security_tokens import router as security_tokens_rout
 from repositoryuta.routers.session_management import router as session_management_router
 from repositoryuta.routers.sessions import router as sessions_router
 from repositoryuta.routers.student_provisioning import router as student_provisioning_router
+from repositoryuta.routers.user_access import router as user_access_router
 from repositoryuta.routers.user_access_profiles import router as user_access_profiles_router
 from repositoryuta.routers.user_activity import router as user_activity_router
 from repositoryuta.routers.user_employees import router as user_employees_router
 from repositoryuta.routers.user_roles import router as user_roles_router
 from repositoryuta.routers.users import router as users_router
 from repositoryuta.routers.well_known import router as well_known_router
+from repositoryuta.services.session_housekeeping_service import housekeeping_loop
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    housekeeping: asyncio.Task[None] | None = None
+    if settings.session_housekeeping_enabled and settings.app_env != "test":
+        housekeeping = asyncio.create_task(
+            housekeeping_loop(
+                get_session_factory(), retention_days=settings.activity_log_retention_days
+            )
+        )
     yield
+    if housekeeping is not None:
+        housekeeping.cancel()
+        with suppress(asyncio.CancelledError):
+            await housekeeping
     dispose_engine()
 
 
@@ -132,6 +147,7 @@ def create_app() -> FastAPI:
     app.include_router(role_change_history_router)
     app.include_router(permission_change_history_router)
     app.include_router(user_activity_router)
+    app.include_router(user_access_router)
     app.include_router(azure_sync_log_router)
     app.include_router(hr_sync_log_router)
     app.include_router(local_credentials_router)

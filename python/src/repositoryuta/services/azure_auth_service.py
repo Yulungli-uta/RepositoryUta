@@ -5,7 +5,7 @@ import hmac
 import json
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 import msal
@@ -13,6 +13,7 @@ import requests
 from sqlalchemy.orm import Session
 
 from repositoryuta.config import get_settings
+from repositoryuta.core import clock
 from repositoryuta.core.security import jwt as jwt_core
 from repositoryuta.core.ttl_cache import TtlCache
 from repositoryuta.repositories.application_repository import ApplicationRepository
@@ -85,7 +86,7 @@ def build_auth_url(
         "browserId": browser_id,
         "deviceInfo": device_info,
         "codeChallenge": code_challenge,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": clock.now().isoformat(),
         "source": "azure_auth",
     }
     state_encoded = base64.b64encode(json.dumps(state_data).encode("utf-8")).decode("ascii")
@@ -178,7 +179,7 @@ def handle_callback(
     refresh_token = base64.b64encode(secrets.token_bytes(48)).decode("ascii")
     refresh_hash = token_service.hash_token(refresh_token)
 
-    now = datetime.now()
+    now = clock.now()
     sessions = SessionRepository(session)
     session_row = sessions.create_session(
         user_id=user.id,
@@ -190,6 +191,9 @@ def handle_callback(
         user_agent=user_agent,
         browser_id=browser_id,
         session_id=new_session_id,
+    )
+    auth_service.supersede_previous_browser_sessions(
+        sessions, user.id, browser_id, session_row.session_id
     )
     users.set_last_login(user.id, now)
 

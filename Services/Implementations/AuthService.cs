@@ -26,9 +26,13 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly IIdentityProviderResolver _identityResolver;
         private readonly RsaKeyProvider _keys;
         private readonly IMemoryCache _cache;
+        private readonly IUserActivityService _activity;
 
-        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger, IIdentityProviderResolver identityResolver, RsaKeyProvider keys, IMemoryCache cache)
+        private readonly IAppClock _clock;
+
+        public AuthService(IUserRepository users, IAuthRepository auth, ITokenService tokens, AuthDbContext context, IConfiguration cfg, ILogger<AuthService> logger, IIdentityProviderResolver identityResolver, RsaKeyProvider keys, IMemoryCache cache, IUserActivityService activity, IAppClock clock)
         {
+            _clock = clock;
             _users = users;
             _auth = auth;
             _tokens = tokens;
@@ -38,11 +42,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             _identityResolver = identityResolver;
             _keys = keys;
             _cache = cache;
+            _activity = activity;
         }
 
         public async Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null, string? browserId = null)
         {
-            var now = DateTime.Now;
+            var now = _clock.Now;
             var u = await _users.FindByEmailAsync(email);
             if (u is null || !u.IsActive || !string.Equals(u.UserType, "Local", StringComparison.OrdinalIgnoreCase))
             {
@@ -59,6 +64,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 return null;
             }
 
+            // El bloqueo por 5 intentos fallidos NO se levanta solo: lo quita un administrador con el botón
+            // "Desbloquear" (POST api/local-credentials/{id}/unlock). LockedUntil queda como referencia.
             if (cred.IsLocked || (cred.LockedUntil.HasValue && cred.LockedUntil.Value > now))
             {
                 await _auth.InsertLoginAsync(u.Id, email, false, "Local", "Blocked", "Locked account", null, ipAddress, userAgent, deviceInfo);
@@ -99,6 +106,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var refresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshHash = _tokens.Hash(refresh);
             var session = await _auth.CreateSessionAsync(u.Id, access, refreshHash, now.AddDays(7), deviceInfo, ipAddress, userAgent, browserId, sessionId: newSessionId);
+            await SupersedePreviousBrowserSessionsAsync(u.Id, browserId, session.SessionId);
             await _users.SetLastLoginAsync(u.Id, now);
             await _auth.InsertLoginAsync(u.Id, email, true, "Local", "Success", null, session.SessionId, ipAddress, userAgent, deviceInfo);
             _logger.LogInformation("Login exitoso para {Email}, SessionId: {SessionId}", email, session.SessionId);
@@ -114,6 +122,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 // El hash no corresponde a ninguna sesión activa: puede ser un token
                 // inválido/expirado normal o el reuso de un token ya rotado (robo).
                 await DetectRefreshTokenReuseAsync(hash);
+                await LogRefreshRejectedAsync(hash);
                 return null;
             }
             var (sess, u) = found.Value;
@@ -124,7 +133,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var newAccess = await _tokens.CreateAsync(u.Id, u.Email, roles, adGroups, hrEmployeeId, sessionId: newSessionId);
             var newRefresh = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var newHash = _tokens.Hash(newRefresh);
-            var newExp = DateTime.Now.AddDays(7);
+            var newExp = _clock.Now.AddDays(7);
             await _auth.RevokeSessionAsync(sess.SessionId, "Rotated");
             await _auth.CreateSessionAsync(u.Id, newAccess, newHash, newExp, sess.DeviceInfo, sess.IpAddress, sess.UserAgent, sess.BrowserId, sessionId: newSessionId);
             return new TokenPair(newAccess, newRefresh);
@@ -152,7 +161,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 // de cuándo se rotó, no se castiga (evita falsos positivos tras el despliegue).
                 if (rotated.RevokedAt is null) return;
 
-                if (DateTime.Now - rotated.RevokedAt.Value <= RefreshReuseGraceWindow) return;
+                if (_clock.Now - rotated.RevokedAt.Value <= RefreshReuseGraceWindow) return;
 
                 var revokedCount = await _auth.RevokeAllActiveSessionsForUserAsync(rotated.UserId, "RefreshReuse");
                 await _auth.InsertLoginAsync(rotated.UserId, string.Empty, false, "Refresh", "TokenReuse",
@@ -170,12 +179,65 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             }
         }
 
-        public async Task<bool> LogoutAsync(string refreshToken)
+        /// <summary>
+        /// Deja constancia de una renovación rechazada cuando se puede identificar al usuario
+        /// (sesión vencida o usuario inactivo). Los tokens desconocidos o ya rotados no se registran
+        /// aquí: los rotados los cubre la detección de reuso. Best-effort. El motivo NO se devuelve al cliente.
+        /// </summary>
+        private async Task LogRefreshRejectedAsync(string refreshHash)
+        {
+            try
+            {
+                var sess = await _context.UserSessions.AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.RefreshToken == refreshHash && (s.IsActive || s.Status == "Expired"));
+                if (sess is null) return;
+
+                string reason;
+                if (sess.ExpiresAt <= _clock.Now) reason = "EXPIRED";
+                else reason = "USER_INACTIVE";
+
+                await _activity.LogAsync(sess.UserId, UserActivityCodes.RefreshRejected, new { reason },
+                    sess.SessionId, sess.IpAddress, sess.UserAgent);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error registrando la renovación rechazada");
+            }
+        }
+
+        /// <summary>
+        /// Al iniciar sesión, cierra las sesiones anteriores del mismo navegador. Se desactiva con
+        /// Security:SupersedeBrowserSessions=false. Best-effort: un fallo aquí nunca impide el login.
+        /// </summary>
+        private async Task SupersedePreviousBrowserSessionsAsync(Guid userId, string? browserId, Guid currentSessionId)
+        {
+            if (!_cfg.GetValue("Security:SupersedeBrowserSessions", true)) return;
+            try
+            {
+                var closed = await _auth.RevokeOtherBrowserSessionsAsync(userId, browserId, currentSessionId);
+                if (closed > 0)
+                    _logger.LogInformation("Sesiones previas del mismo navegador cerradas al iniciar sesión: {Count}. UserId: {UserId}", closed, userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "No se pudieron cerrar las sesiones previas del navegador. UserId: {UserId}", userId);
+            }
+        }
+
+        public async Task<bool> LogoutAsync(string refreshToken, string? reason = null)
         {
             var hash = _tokens.Hash(refreshToken);
             var found = await _auth.GetActiveSessionByRefreshHashAsync(hash);
             if (found is null) return true;
-            await _auth.RevokeSessionAsync(found.Value.Sess.SessionId, "Logout");
+            var sess = found.Value.Sess;
+            await _auth.RevokeSessionAsync(sess.SessionId, "Logout");
+
+            // El motivo solo se registra si está en la lista cerrada: el cliente no puede escribir texto libre
+            if (reason is not null && UserActivityCodes.AllowedLogoutReasons.Contains(reason))
+            {
+                await _activity.LogAsync(sess.UserId, UserActivityCodes.SessionResetAuto, new { reason },
+                    sess.SessionId, sess.IpAddress, sess.UserAgent);
+            }
             return true;
         }
 
@@ -338,7 +400,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 if (Guid.TryParse(token, out var tokenGuid))
                 {
                     var session = await _context.UserSessions
-                        .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > DateTime.Now);
+                        .FirstOrDefaultAsync(s => s.SessionId == tokenGuid && s.IsActive && s.ExpiresAt > _clock.Now);
                     if (session != null)
                         return new ValidateTokenResponse(true, "User token", session.ExpiresAt, session.UserId, session.SessionId, "Token is valid", null);
                 }
@@ -395,7 +457,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
             // Invalida cualquier OTP previo pendiente para este usuario
             var existing = await _context.SecurityTokens
-                .Where(t => t.UserId == userId && t.TokenType == "PasswordChange2FA" && !t.IsUsed && t.ExpiresAt > DateTime.Now)
+                .Where(t => t.UserId == userId && t.TokenType == "PasswordChange2FA" && !t.IsUsed && t.ExpiresAt > _clock.Now)
                 .ToListAsync();
             foreach (var t in existing) t.IsUsed = true;
 
@@ -408,7 +470,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 UserId = userId,
                 TokenType = "PasswordChange2FA",
                 TokenHash = otpHash,
-                ExpiresAt = DateTime.Now.AddMinutes(10),
+                ExpiresAt = _clock.Now.AddMinutes(10),
                 AdditionalData = userId.ToString()
             });
             await _context.SaveChangesAsync();
@@ -452,7 +514,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     t.TokenType == "PasswordChange2FA" &&
                     t.TokenHash == otpHash &&
                     !t.IsUsed &&
-                    t.ExpiresAt > DateTime.Now);
+                    t.ExpiresAt > _clock.Now);
 
             if (token is null)
             {
@@ -476,7 +538,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                     t.TokenType == "PasswordChange2FA" &&
                     t.TokenHash == otpHash &&
                     !t.IsUsed &&
-                    t.ExpiresAt > DateTime.Now);
+                    t.ExpiresAt > _clock.Now);
 
             if (token is null)
             {
@@ -494,7 +556,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private async Task ApplyPasswordChangeAsync(Guid userId, LocalUserCredential cred, string newPassword)
         {
             var newHash = PasswordHasher.Hash(newPassword);
-            var now = DateTime.Now;
+            var now = _clock.Now;
 
             cred.PasswordHash = newHash;
             cred.PasswordCreatedAt = now;

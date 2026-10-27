@@ -105,6 +105,12 @@ class Settings(BaseSettings):
     root_path: str = "/WsSeguUta"
     log_level: str = "INFO"
 
+    # Mantenimiento periodico: marca sesiones vencidas y limpia la bitacora de eventos antigua
+    session_housekeeping_enabled: bool = True
+    activity_log_retention_days: int = Field(default=90, ge=30, le=3650)
+    # Al iniciar sesion se cierran las sesiones previas del mismo navegador (browserId)
+    supersede_browser_sessions: bool = True
+
     database_url: str | None = Field(default=None, repr=False)
     database_url_file: Path | None = None
     db_pool_size: int = Field(default=5, ge=1, le=20)

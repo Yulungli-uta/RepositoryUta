@@ -16,6 +16,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
         /// canjeable en POST /api/auth/azure/exchange.
         /// </param>
         Task NotifyLoginEventForApplicationAsync(Guid userId, string loginType, string? ipAddress, string clientId, TokenPair? pair, string browserId, string? deliveryCode = null);
+        /// <summary>
+        /// Avisa a la pestaña que está esperando el login (grupo del navegador) de que Microsoft no lo completó
+        /// (el usuario pulsó "Atrás"/canceló o rechazó el acceso), para que deje de esperar. No incluye el motivo exacto.
+        /// </summary>
+        Task NotifyLoginFailedAsync(string clientId, string browserId);
         Task NotifyLogoutEventAsync(Guid userId);
         Task NotifyUserCreatedEventAsync(Guid userId);
         Task<NotificationStatsDto> GetNotificationStatsAsync();

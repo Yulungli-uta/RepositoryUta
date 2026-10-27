@@ -237,6 +237,12 @@ builder.Services.AddScoped<IUserPermissionRepository, UserPermissionRepository>(
 builder.Services.AddScoped<IApplicationRepository, ApplicationRepository>();
 builder.Services.AddScoped<IClientApplicationService, ClientApplicationService>();
 
+// Reloj central (estándar "Fecha y hora UTA": hora de Ecuador, la decide el servidor)
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IAppClock, AppClock>();
+builder.Services.AddScoped<IUserActivityService, UserActivityService>();
+builder.Services.AddScoped<IUserAccessService, UserAccessService>();
+builder.Services.AddHostedService<SessionHousekeepingService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAzureAuthService, AzureAuthService>();
