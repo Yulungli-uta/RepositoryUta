@@ -32,6 +32,15 @@ class AzureAuthUrlRequest(ApiModel):
     device_info: str | None = None
 
 
+class AzureClaimRequest(ApiModel):
+    """Reclamo del login pendiente: la pestana que inicio el login con Office 365 pregunta por
+    su deliveryCode con su browserId y su codeChallenge. El codigo solo se puede canjear con
+    el codeVerifier de esa pestana."""
+
+    browser_id: str
+    code_challenge: str
+
+
 class AzureExchangeRequest(ApiModel):
     """Intercambio PKCE (RFC 7636): canjea un deliveryCode de un solo uso por el
     par de tokens real, demostrando posesion del codeVerifier que nunca salio de

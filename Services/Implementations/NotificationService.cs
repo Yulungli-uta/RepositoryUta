@@ -100,7 +100,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 .ToListAsync();
         }
 
-        public async Task NotifyLoginFailedAsync(string clientId, string browserId)
+        public async Task NotifyLoginFailedAsync(string clientId, string browserId, string? code = null, string? reference = null)
         {
             try
             {
@@ -110,7 +110,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 {
                     eventType = "LoginFailed",
                     timestamp = _clock.Now,
-                    context = new { initiatingApplication = clientId, loginSource = "Office365" }
+                    context = new { initiatingApplication = clientId, loginSource = "Office365", code, reference }
                 });
             }
             catch (Exception ex)

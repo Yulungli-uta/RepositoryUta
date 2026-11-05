@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import uuid
 from datetime import timedelta
@@ -24,6 +25,8 @@ from repositoryuta.schemas.audit import LoginHistoryCreate
 from repositoryuta.schemas.auth import TokenPair
 from repositoryuta.services import auth_service, token_service
 
+logger = logging.getLogger(__name__)
+
 # Espejo de AzureAuthService.cs: flujo OAuth2/PKCE (RFC 7636) de login
 # institucional vía Azure AD, usando MSAL (msal-python, mismo fabricante que
 # Microsoft.Identity.Client en .NET). El relay del deliveryCode hacia la
@@ -42,6 +45,22 @@ _SCOPES = ["email", "User.Read"]
 _STATE_TTL_SECONDS = 600
 _DELIVERY_CODE_TTL_SECONDS = 300
 
+# Codigos genericos que se muestran al usuario; el motivo exacto queda solo en log y auditoria.
+FAILURE_CANCELLED = "CANCELLED"
+FAILURE_EXPIRED_ATTEMPT = "EXPIRED_ATTEMPT"
+FAILURE_NO_ACCESS = "NO_ACCESS"
+FAILURE_SERVER_ERROR = "SERVER_ERROR"
+
+
+class AzureLoginRejected(PermissionError):
+    """Rechazo del login Azure con un codigo generico para el usuario. Hereda de
+    PermissionError para no cambiar quien la captura."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 _state_cache = TtlCache()
 _delivery_cache = TtlCache()
 
@@ -50,6 +69,40 @@ def reset_caches() -> None:
     """Solo para pruebas — los caches reales viven todo el ciclo del proceso."""
     _state_cache.clear()
     _delivery_cache.clear()
+
+
+def _pending_key(browser_id: str, code_challenge: str) -> str:
+    """Indice del reclamo (browserId, codeChallenge) -> deliveryCode. Clave hash: ninguno queda
+    en claro."""
+    digest = hashlib.sha256(f"{browser_id}|{code_challenge}".encode()).hexdigest()
+    return f"pending:{digest}"
+
+
+def record_login_failure(
+    session: Session,
+    reason: str,
+    email: str | None,
+    reference: str | None,
+    ip_address: str | None,
+    user_agent: str | None,
+    device_info: str | None,
+) -> None:
+    """Deja constancia en el historial de acceso de un intento Azure que no termino en sesion.
+    Nunca lanza: es auditoria y no debe tapar el error original del login."""
+    try:
+        detail = f"{reason} ref={reference or '-'}" + (f" email={email}" if email else "")
+        AuditRepository(session).insert_login(
+            LoginHistoryCreate(
+                login_type="AzureAD",
+                login_status="Failed",
+                failure_reason=detail[:300],
+                ip_address=ip_address,
+                user_agent=user_agent,
+                device_info=device_info,
+            )
+        )
+    except Exception:
+        logger.exception("[AZURE-LOGIN] No se pudo registrar el intento fallido en el historial.")
 
 
 def _msal_app() -> msal.ConfidentialClientApplication:
@@ -111,6 +164,7 @@ def handle_callback(
     ip_address: str | None = None,
     user_agent: str | None = None,
     device_info: str | None = None,
+    reference: str | None = None,
 ) -> TokenPair | None:
     """Espejo de AzureAuthService.HandleCallbackAsync. Retorna None si el MFA
     de Azure fue exitoso pero no existe usuario local para ese correo (no es
@@ -120,7 +174,10 @@ def handle_callback(
     cache_key = f"ms_state:{state_id}"
 
     if _state_cache.get(cache_key) is None:
-        raise PermissionError("State inválido o expirado.")
+        record_login_failure(
+            session, "AZURE_STATE_INVALID", None, reference, ip_address, user_agent, device_info
+        )
+        raise AzureLoginRejected(FAILURE_EXPIRED_ATTEMPT, "State inválido o expirado.")
     _state_cache.remove(cache_key)
 
     client_id = state_data.get("clientId")
@@ -152,11 +209,21 @@ def handle_callback(
 
     allowed_domain = settings.allowed_domain
     if allowed_domain and not email.lower().endswith(f"@{allowed_domain.lower()}"):
-        raise PermissionError("Solo se permiten cuentas institucionales.")
+        record_login_failure(
+            session, "AZURE_DOMAIN_REJECTED", email, reference, ip_address, user_agent, device_info
+        )
+        raise AzureLoginRejected(FAILURE_NO_ACCESS, "Solo se permiten cuentas institucionales.")
 
     users = UserRepository(session)
     user = users.find_by_email(email)
     if user is None:
+        logger.warning(
+            "[AZURE-LOGIN] MFA exitoso pero no existe usuario local para este correo. ref=%s",
+            reference,
+        )
+        record_login_failure(
+            session, "AZURE_NO_LOCAL_USER", email, reference, ip_address, user_agent, device_info
+        )
         return None
 
     if azure_id_str:
@@ -224,16 +291,19 @@ def complete_login_and_issue_delivery_code(
     ip_address: str | None = None,
     user_agent: str | None = None,
     device_info: str | None = None,
+    reference: str | None = None,
 ) -> tuple[TokenPair | None, str | None]:
     """Espejo de CompleteLoginAndIssueDeliveryCodeAsync."""
     code_challenge = None
+    state_browser_id = None
     try:
         state_data = _decode_state(state)
         code_challenge = state_data.get("codeChallenge")
+        state_browser_id = state_data.get("browserId")
     except Exception:
         pass  # handle_callback lanzará su propia validación de state abajo.
 
-    pair = handle_callback(session, code, state, ip_address, user_agent, device_info)
+    pair = handle_callback(session, code, state, ip_address, user_agent, device_info, reference)
     if pair is None:
         return None, None
 
@@ -243,10 +313,35 @@ def complete_login_and_issue_delivery_code(
     delivery_code = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
     _delivery_cache.set(
         f"delivery:{delivery_code}",
-        {"pair": pair, "code_challenge": code_challenge},
+        {"pair": pair, "code_challenge": code_challenge, "browser_id": state_browser_id},
         _DELIVERY_CODE_TTL_SECONDS,
     )
+    if get_settings().azure_ad.pending_claim_enabled and state_browser_id:
+        _delivery_cache.set(
+            _pending_key(state_browser_id, code_challenge),
+            delivery_code,
+            _DELIVERY_CODE_TTL_SECONDS,
+        )
     return pair, delivery_code
+
+
+def claim_pending_delivery(browser_id: str, code_challenge: str) -> str | None:
+    """Reclamo del login pendiente: devuelve el deliveryCode del intento de esa pestana si el
+    aviso de entrega no le llego. Retorna None si no hay nada pendiente (sin distinguir el
+    motivo) o si esta deshabilitado. El codigo solo se puede canjear con el codeVerifier que
+    unicamente esa pestana conoce (PKCE)."""
+    if not get_settings().azure_ad.pending_claim_enabled:
+        return None
+    if not browser_id or not browser_id.strip() or not code_challenge or not code_challenge.strip():
+        return None
+
+    delivery_code = _delivery_cache.get(_pending_key(browser_id, code_challenge))
+    if delivery_code is None or _delivery_cache.get(f"delivery:{delivery_code}") is None:
+        return None
+    logger.info(
+        "[AZURE-LOGIN] Login pendiente reclamado por la pestaña (la entrega no había llegado)."
+    )
+    return delivery_code
 
 
 def exchange_delivery_code(delivery_code: str, code_verifier: str) -> TokenPair | None:
@@ -263,4 +358,7 @@ def exchange_delivery_code(delivery_code: str, code_verifier: str) -> TokenPair 
         return None
 
     _delivery_cache.remove(cache_key)
+    browser_id = entry.get("browser_id")
+    if browser_id:
+        _delivery_cache.remove(_pending_key(browser_id, entry["code_challenge"]))
     return entry["pair"]

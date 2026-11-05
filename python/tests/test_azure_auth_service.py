@@ -243,3 +243,97 @@ def test_exchange_delivery_code_full_flow(sqlite_session, monkeypatch: pytest.Mo
 
 def test_exchange_delivery_code_unknown_code_returns_none() -> None:
     assert azure_auth_service.exchange_delivery_code("unknown", "verifier") is None
+
+
+# ── reclamo del login pendiente ───────────────────────────────────────────────
+
+
+def _issue_pending_delivery(sqlite_session, monkeypatch, *, browser_id="browser-1"):
+    _make_app(sqlite_session)
+    user = User(id=uuid4(), email="juan@uta.edu.ec", user_type="AzureAD", is_active=True)
+    sqlite_session.add(user)
+    sqlite_session.flush()
+    challenge = azure_auth_service._compute_code_challenge("a-secret-verifier")
+    _, state = azure_auth_service.build_auth_url(
+        sqlite_session, "uta-signature", browser_id=browser_id, code_challenge=challenge
+    )
+    _patch_graph_me(monkeypatch, {"userPrincipalName": "juan@uta.edu.ec", "id": str(uuid4())})
+    _, delivery_code = azure_auth_service.complete_login_and_issue_delivery_code(
+        sqlite_session, "code", state
+    )
+    return challenge, delivery_code
+
+
+def test_claim_pending_delivery_requires_same_browser_and_challenge(
+    sqlite_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    challenge, delivery_code = _issue_pending_delivery(sqlite_session, monkeypatch)
+
+    assert azure_auth_service.claim_pending_delivery("browser-1", challenge) == delivery_code
+    assert azure_auth_service.claim_pending_delivery("browser-2", challenge) is None
+    assert azure_auth_service.claim_pending_delivery("browser-1", "otro-challenge") is None
+    assert azure_auth_service.claim_pending_delivery("", challenge) is None
+
+
+def test_claim_pending_delivery_disappears_after_exchange(
+    sqlite_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    challenge, delivery_code = _issue_pending_delivery(sqlite_session, monkeypatch)
+
+    # Un canje con verifier equivocado no consume ni el codigo ni el reclamo
+    assert azure_auth_service.exchange_delivery_code(delivery_code, "wrong") is None
+    assert azure_auth_service.claim_pending_delivery("browser-1", challenge) == delivery_code
+
+    assert azure_auth_service.exchange_delivery_code(delivery_code, "a-secret-verifier") is not None
+    assert azure_auth_service.claim_pending_delivery("browser-1", challenge) is None
+
+
+def test_claim_pending_delivery_can_be_disabled(
+    sqlite_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from repositoryuta.config import get_settings
+
+    challenge, _ = _issue_pending_delivery(sqlite_session, monkeypatch)
+    monkeypatch.setattr(get_settings().azure_ad, "pending_claim_enabled", False)
+
+    assert azure_auth_service.claim_pending_delivery("browser-1", challenge) is None
+
+
+# ── intentos fallidos en el historial de acceso ───────────────────────────────
+
+
+def _failed_logins(session) -> list[LoginHistory]:
+    return list(
+        session.query(LoginHistory)
+        .filter(LoginHistory.login_type == "AzureAD", LoginHistory.login_status == "Failed")
+        .all()
+    )
+
+
+def test_unknown_local_user_is_recorded_as_failed_login(
+    sqlite_session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _make_app(sqlite_session)
+    _, state = azure_auth_service.build_auth_url(sqlite_session, "uta-signature")
+    _patch_graph_me(monkeypatch, {"userPrincipalName": "nadie@uta.edu.ec", "id": str(uuid4())})
+
+    result = azure_auth_service.handle_callback(sqlite_session, "code", state, reference="AB12CD34")
+
+    assert result is None
+    rows = _failed_logins(sqlite_session)
+    assert len(rows) == 1
+    assert "AZURE_NO_LOCAL_USER" in rows[0].failure_reason
+    assert "ref=AB12CD34" in rows[0].failure_reason
+
+
+def test_expired_state_is_recorded_and_carries_generic_code(sqlite_session) -> None:
+    _make_app(sqlite_session)
+    raw = json.dumps({"stateId": "x", "clientId": "uta-signature"}).encode()
+    state = base64.b64encode(raw).decode()
+
+    with pytest.raises(azure_auth_service.AzureLoginRejected) as excinfo:
+        azure_auth_service.handle_callback(sqlite_session, "code", state, reference="REF00001")
+
+    assert excinfo.value.code == azure_auth_service.FAILURE_EXPIRED_ATTEMPT
+    rows = _failed_logins(sqlite_session)
+    assert [r.failure_reason for r in rows] == ["AZURE_STATE_INVALID ref=REF00001"]

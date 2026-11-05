@@ -5,6 +5,9 @@ from slowapi import Limiter
 # Program.cs (FixedWindowLimiter), no en appsettings.json — misma decision
 # aca (regla de Fase 1 sobre constantes vs. tablas de parametrizacion).
 LOGIN_RATE_LIMIT = "6/minute"
+# Reclamo del login pendiente: la pestana lo consulta al recuperar el foco o reconectarse
+# (mas frecuente que un login).
+CLAIM_RATE_LIMIT = "60/minute"
 
 
 def get_client_ip(request: Request) -> str:

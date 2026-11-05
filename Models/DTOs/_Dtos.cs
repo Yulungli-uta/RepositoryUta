@@ -18,6 +18,7 @@ public record TokenPair(string AccessToken, string RefreshToken);
 /// que inició el login con Office 365.
 /// </summary>
 public record AzureExchangeRequest(string DeliveryCode, string CodeVerifier);
+public record AzureClaimRequest(string BrowserId, string CodeChallenge);
 
 // Users
 // HrEmployeeId es obligatorio por el mismo motivo que en CreateUserEmployeeDto (ver nota abajo):

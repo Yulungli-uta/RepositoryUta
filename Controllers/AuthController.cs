@@ -161,6 +161,32 @@ public class AuthController : ControllerBase
             : Ok(ApiResponse.Ok(pair));
     }
 
+    /// <summary>
+    /// Reclamo del login pendiente: devuelve el deliveryCode del intento de esta pestaña si el aviso no le llegó.
+    /// Siempre responde 200; sin nada pendiente (o con el reclamo deshabilitado) el dato viene null, sin explicar el
+    /// motivo. El código solo se puede canjear con el codeVerifier que únicamente la pestaña conoce.
+    /// </summary>
+    [HttpPost("azure/claim")]
+    [AllowAnonymous]
+    [EnableRateLimiting("claim")]
+    public IActionResult AzureClaim([FromBody] AzureClaimRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.BrowserId) || string.IsNullOrWhiteSpace(req.CodeChallenge))
+            return BadRequest(ApiResponse.Fail("browserId y codeChallenge son requeridos"));
+
+        var deliveryCode = _azure.ClaimPendingDelivery(req.BrowserId, req.CodeChallenge);
+        return Ok(ApiResponse.Ok(new { deliveryCode }));
+    }
+
+    /// <summary>Referencia corta que se muestra al usuario y queda en el log y en el historial de acceso.</summary>
+    private static string NewReference() => Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+    /// <summary>Página del popup para un fallo: mensaje genérico + referencia; el motivo real queda solo en el servidor.</summary>
+    private static string FailurePopup(string title, string message, string reference, int closeMs = 5000) =>
+        $"<html><body style=\"font-family:sans-serif;text-align:center;margin-top:3em\"><h3>{title}</h3><p>{message}</p>" +
+        $"<p style=\"font-size:12px;color:#666\">Código de referencia: <b>{reference}</b></p>" +
+        $"<script>setTimeout(()=>window.close(),{closeMs});</script></body></html>";
+
     [HttpGet("azure/callback")]
     [AllowAnonymous]
     public async Task<IActionResult> AzureCallback(
@@ -175,6 +201,7 @@ public class AuthController : ControllerBase
         var deviceInfo = GetDeviceInfo();
         string? clientId = null;
         string? browserId = null;
+        var reference = NewReference();
         try
         {           
 
@@ -203,7 +230,7 @@ public class AuthController : ControllerBase
                 "[AZURE-LOGIN] Inicio de sesión no completado en Microsoft (error={Error}). ClientId={ClientId}, BrowserId={BrowserId}",
                 string.IsNullOrWhiteSpace(error) ? "sin_code" : error, clientId, browserId);
             if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
-                await _notificationService.NotifyLoginFailedAsync(clientId, browserId);
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, AzureLoginFailureCodes.Cancelled);
             return Content(
                 "<html><body><h3>Inicio de sesión no completado</h3><p>No se completó el inicio de sesión con Microsoft. " +
                 "Puedes cerrar esta ventana e intentarlo de nuevo.</p><script>setTimeout(()=>window.close(),1500);</script></body></html>",
@@ -223,21 +250,29 @@ public class AuthController : ControllerBase
             if (secureTokenDelivery)
             {
                 (pair, deliveryCode) = await _azure.CompleteLoginAndIssueDeliveryCodeAsync(
-                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo);
+                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo, reference: reference);
             }
             else
             {
                 pair = await _azure.HandleCallbackAsync(
-                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo);
+                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo, reference: reference);
             }
         }
         catch (UnauthorizedAccessException ex)
         {
+            // El motivo exacto (ex.Message) queda solo en el log: al usuario se le muestra una categoría genérica y la referencia.
             _logger.LogWarning(
-                "[AZURE-LOGIN] Callback rechazado ({Message}). ClientId={ClientId}, BrowserId={BrowserId}",
-                ex.Message, clientId, browserId);
+                "[AZURE-LOGIN] Callback rechazado ({Message}). Ref={Reference}, ClientId={ClientId}, BrowserId={BrowserId}",
+                ex.Message, reference, clientId, browserId);
+            var rejection = (ex as AzureLoginRejectedException)?.Code ?? AzureLoginFailureCodes.NoAccess;
+            if (ex is not AzureLoginRejectedException)
+                await _azure.RecordLoginFailureAsync("AZURE_REJECTED", null, reference, clientIp, userAgent, deviceInfo);
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, rejection, reference);
             return Content(
-                $"<html><body><h3>Acceso no autorizado</h3><p>{ex.Message}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
+                rejection == AzureLoginFailureCodes.ExpiredAttempt
+                    ? FailurePopup("El intento de inicio de sesión expiró", "Cierra esta ventana e intenta de nuevo.", reference)
+                    : FailurePopup("No se pudo habilitar tu acceso", "Esta cuenta no tiene acceso habilitado al sistema. Comunica el código de referencia a DITIC.", reference),
                 "text/html");
         }
         catch (Exception ex)
@@ -249,10 +284,13 @@ public class AuthController : ControllerBase
             // Azure. Ahora se responde con la misma página de cierre que el resto de casos de
             // esta acción, y el detalle real queda solo en el log (nunca se expone al cliente).
             _logger.LogError(ex,
-                "[AZURE-LOGIN] Error inesperado procesando el callback de Azure. ClientId={ClientId}, BrowserId={BrowserId}, TraceId={TraceId}",
-                clientId, browserId, HttpContext.TraceIdentifier);
+                "[AZURE-LOGIN] Error inesperado procesando el callback de Azure. Ref={Reference}, ClientId={ClientId}, BrowserId={BrowserId}, TraceId={TraceId}",
+                reference, clientId, browserId, HttpContext.TraceIdentifier);
+            await _azure.RecordLoginFailureAsync("AZURE_SERVER_ERROR", null, reference, clientIp, userAgent, deviceInfo);
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, AzureLoginFailureCodes.ServerError, reference);
             return Content(
-                $"<html><body><h3>Ocurrió un error inesperado</h3><p>No se pudo completar el inicio de sesión. Cierra esta ventana e intenta de nuevo.</p><p style=\"font-size:11px;color:#888\">Referencia: {HttpContext.TraceIdentifier}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
+                FailurePopup("Ocurrió un error inesperado", "No se pudo completar el inicio de sesión. Cierra esta ventana e intenta de nuevo.", reference),
                 "text/html");
         }
         //Console.WriteLine($"******************Azure login processed. pair: {pair}, TokenPair: {(pair != null ? "Success" : "Failed")}");
@@ -391,7 +429,16 @@ public class AuthController : ControllerBase
             //Console.WriteLine($"***************TokenPair is null - login failed");
         }
 
-        if (pair is null) return Unauthorized(ApiResponse.Fail("No autorizado"));
+        if (pair is null)
+        {
+            // Microsoft autenticó pero no hay usuario local para esa cuenta (ya registrado en el historial de acceso).
+            // Antes el popup mostraba un JSON crudo y la pestaña no se enteraba.
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, AzureLoginFailureCodes.NoAccess, reference);
+            return Content(
+                FailurePopup("No se pudo habilitar tu acceso", "Esta cuenta no tiene acceso habilitado al sistema. Comunica el código de referencia a DITIC.", reference),
+                "text/html");
+        }
 
         // Retornar HTML que cierra la ventana popup
         var html = @"

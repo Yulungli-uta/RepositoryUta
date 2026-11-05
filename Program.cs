@@ -161,6 +161,19 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true
             }
         ));
+
+    // Reclamo del login pendiente: la pestaña lo consulta al recuperar el foco o reconectarse
+    options.AddPolicy("claim", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }
+        ));
 });
 
 // =========================================================

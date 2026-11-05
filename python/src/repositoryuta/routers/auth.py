@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from urllib.parse import quote
 from uuid import UUID
 
@@ -8,11 +9,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from repositoryuta.config import get_settings
-from repositoryuta.core.rate_limit import LOGIN_RATE_LIMIT, get_client_ip, limiter
+from repositoryuta.core.rate_limit import CLAIM_RATE_LIMIT, LOGIN_RATE_LIMIT, get_client_ip, limiter
 from repositoryuta.core.schema_base import dump
 from repositoryuta.routers.dependencies import get_current_user_id, get_db_session
 from repositoryuta.schemas.auth import (
     AzureAuthUrlRequest,
+    AzureClaimRequest,
     AzureExchangeRequest,
     LoginRequest,
     LogoutRequest,
@@ -236,6 +238,19 @@ def azure_url_post(
     )
 
 
+@router.post("/azure/claim")
+@limiter.limit(CLAIM_RATE_LIMIT)
+def azure_claim(request: Request, body: AzureClaimRequest) -> ApiResponse:
+    """Reclamo del login pendiente. Siempre 200: sin nada pendiente (o con el reclamo
+    deshabilitado) el dato viene null, sin explicar el motivo."""
+    if not body.browser_id.strip() or not body.code_challenge.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="browserId y codeChallenge son requeridos"
+        )
+    delivery_code = azure_auth_service.claim_pending_delivery(body.browser_id, body.code_challenge)
+    return ApiResponse.ok({"deliveryCode": delivery_code})
+
+
 @router.post("/azure/exchange")
 @limiter.limit(LOGIN_RATE_LIMIT)
 def azure_exchange(
@@ -256,11 +271,47 @@ def azure_exchange(
     return ApiResponse.ok(dump(pair))
 
 
-def _closing_popup_html(message: str) -> str:
-    return (
-        f"<html><body><h3>{message}</h3>"
-        "<script>setTimeout(()=>window.close(),3000);</script></body></html>"
+def _closing_popup_html(message: str, reference: str | None = None) -> str:
+    ref_html = (
+        f'<p style="font-size:12px;color:#666">Código de referencia: <b>{reference}</b></p>'
+        if reference
+        else ""
     )
+    return (
+        f"<html><body><h3>{message}</h3>{ref_html}"
+        "<script>setTimeout(()=>window.close(),5000);</script></body></html>"
+    )
+
+
+_FAILURE_MESSAGES = {
+    azure_auth_service.FAILURE_EXPIRED_ATTEMPT: (
+        "El intento de inicio de sesión expiró. Cierra esta ventana e intenta de nuevo."
+    ),
+    azure_auth_service.FAILURE_NO_ACCESS: (
+        "Esta cuenta no tiene acceso habilitado al sistema. "
+        "Comunica el código de referencia a DITIC."
+    ),
+    azure_auth_service.FAILURE_SERVER_ERROR: (
+        "Ocurrió un error inesperado. Cierra esta ventana e intenta de nuevo."
+    ),
+}
+
+
+def _failure_response(code: str, reference: str) -> HTMLResponse | RedirectResponse:
+    """Fallo del callback: con relay configurado la pestana que espera se entera (codigo +
+    referencia) y el popup se cierra solo; sin relay se muestra un mensaje generico con la
+    referencia. El motivo exacto nunca se expone."""
+    relay_url = get_settings().azure_ad.frontend_relay_url
+    if relay_url:
+        return RedirectResponse(
+            f"{relay_url}?loginFailed=1&code={quote(code, safe='')}"
+            f"&ref={quote(reference, safe='')}",
+            status_code=302,
+        )
+    message = _FAILURE_MESSAGES.get(
+        code, _FAILURE_MESSAGES[azure_auth_service.FAILURE_SERVER_ERROR]
+    )
+    return HTMLResponse(_closing_popup_html(message, reference))
 
 
 def _delivery_popup_html(payload: dict) -> str:
@@ -283,6 +334,7 @@ def azure_callback(
     session: Session = Depends(get_db_session),
 ) -> HTMLResponse | RedirectResponse:
     settings = get_settings().azure_ad
+    reference = uuid.uuid4().hex[:8].upper()
 
     # Microsoft redirige aqui SIN "code" y con "error" cuando el usuario pulsa "Atras", cancela o
     # rechaza el acceso: no es una falla del servidor. Antes FastAPI respondia 422 con JSON crudo.
@@ -293,7 +345,10 @@ def azure_callback(
             error or "sin_code",
         )
         if settings.frontend_relay_url:
-            return RedirectResponse(f"{settings.frontend_relay_url}?loginFailed=1", status_code=302)
+            return RedirectResponse(
+                f"{settings.frontend_relay_url}?loginFailed=1&code={azure_auth_service.FAILURE_CANCELLED}",
+                status_code=302,
+            )
         return HTMLResponse(
             _closing_popup_html(
                 "No se completó el inicio de sesión con Microsoft. "
@@ -310,6 +365,7 @@ def azure_callback(
                 ip_address=_client_ip(request),
                 user_agent=request.headers.get("User-Agent"),
                 device_info=_device_info(request),
+                reference=reference,
             )
         else:
             pair = azure_auth_service.handle_callback(
@@ -319,25 +375,49 @@ def azure_callback(
                 ip_address=_client_ip(request),
                 user_agent=request.headers.get("User-Agent"),
                 device_info=_device_info(request),
+                reference=reference,
             )
             delivery_code = None
     except PermissionError as exc:
-        return HTMLResponse(_closing_popup_html(f"Acceso no autorizado: {exc}"))
+        # El motivo exacto (str(exc)) queda solo en el log; al usuario se le muestra una
+        # categoria generica y la referencia. Un rechazo con codigo (AzureLoginRejected) ya
+        # quedo en el historial de acceso.
+        logger.warning("[AZURE-LOGIN] Callback rechazado (%s). ref=%s", exc, reference)
+        code_out = (
+            exc.code
+            if isinstance(exc, azure_auth_service.AzureLoginRejected)
+            else azure_auth_service.FAILURE_NO_ACCESS
+        )
+        if not isinstance(exc, azure_auth_service.AzureLoginRejected):
+            azure_auth_service.record_login_failure(
+                session,
+                "AZURE_REJECTED",
+                None,
+                reference,
+                _client_ip(request),
+                request.headers.get("User-Agent"),
+                _device_info(request),
+            )
+        return _failure_response(code_out, reference)
     except Exception:
         # Nunca se expone str(exc) al popup (mismo no-negociable que
         # UnhandledExceptionMiddleware), pero SÍ hay que loggear el traceback real —
         # antes este except lo tragaba en silencio, sin dejar ningún rastro server-side.
-        logger.exception("Error no controlado en azure_callback")
-        return HTMLResponse(
-            _closing_popup_html(
-                "Ocurrió un error inesperado. Cierra esta ventana e intenta de nuevo."
-            )
+        logger.exception("Error no controlado en azure_callback. ref=%s", reference)
+        azure_auth_service.record_login_failure(
+            session,
+            "AZURE_SERVER_ERROR",
+            None,
+            reference,
+            _client_ip(request),
+            request.headers.get("User-Agent"),
+            _device_info(request),
         )
+        return _failure_response(azure_auth_service.FAILURE_SERVER_ERROR, reference)
 
     if pair is None:
-        return HTMLResponse(
-            _closing_popup_html("No existe una cuenta local asociada a este correo institucional.")
-        )
+        # MFA correcto pero sin usuario local (el servicio ya lo registro en el historial).
+        return _failure_response(azure_auth_service.FAILURE_NO_ACCESS, reference)
 
     if delivery_code is not None:
         if settings.frontend_relay_url:

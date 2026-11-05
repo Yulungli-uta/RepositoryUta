@@ -102,7 +102,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             return (url.ToString(), stateEncoded);
         }
 
-        public async Task<TokenPair?> HandleCallbackAsync(string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
+        public async Task<TokenPair?> HandleCallbackAsync(string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null, string? reference = null)
         {
             var stateJson = Encoding.UTF8.GetString(Convert.FromBase64String(state));
             var stateData = System.Text.Json.JsonDocument.Parse(stateJson).RootElement;
@@ -116,7 +116,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 _logger.LogWarning(
                     "[AZURE-LOGIN] Rechazado: state inválido o expirado (o ya usado). StateId={StateId}",
                     stateId);
-                throw new UnauthorizedAccessException("State inválido o expirado.");
+                await RecordLoginFailureAsync("AZURE_STATE_INVALID", null, reference, ipAddress, userAgent, deviceInfo);
+                throw new AzureLoginRejectedException(AzureLoginFailureCodes.ExpiredAttempt, "State inválido o expirado.");
             }
 
             // Eliminar el state inmediatamente para evitar reutilización (anti-replay)
@@ -160,7 +161,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 _logger.LogWarning(
                     "[AZURE-LOGIN] Rechazado: dominio no institucional. Email={Email}, DominioEsperado={AllowedDomain}",
                     email, allowedDomain);
-                throw new UnauthorizedAccessException("Solo se permiten cuentas institucionales.");
+                await RecordLoginFailureAsync("AZURE_DOMAIN_REJECTED", email, reference, ipAddress, userAgent, deviceInfo);
+                throw new AzureLoginRejectedException(AzureLoginFailureCodes.NoAccess, "Solo se permiten cuentas institucionales.");
             }
 
             var user = await _users.FindByEmailAsync(email);
@@ -169,6 +171,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 _logger.LogWarning(
                     "[AZURE-LOGIN] Rechazado: MFA de Azure exitoso pero no existe usuario local para este correo. Email={Email}, AzureObjectId={AzureId}",
                     email, azureIdStr);
+                await RecordLoginFailureAsync("AZURE_NO_LOCAL_USER", email, reference, ipAddress, userAgent, deviceInfo);
                 return null;
             }
             _logger.LogInformation("[AZURE-LOGIN] Usuario autenticado: {UserId}, {Email}", user.Id, email);
@@ -212,7 +215,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         {
             public required TokenPair Pair { get; init; }
             public required string CodeChallenge { get; init; }
+            public string? BrowserId { get; init; }
         }
+
+        // Índice del reclamo: (browserId, codeChallenge) -> deliveryCode, con la misma vida útil que la entrega.
+        // Se guarda con una clave hash para no dejar browserId ni challenge en claro en la caché.
+        private bool PendingClaimEnabled => _cfg.GetValue("AzureAd:PendingClaimEnabled", true);
+
+        private static string PendingKey(string browserId, string codeChallenge) =>
+            "pending:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{browserId}|{codeChallenge}")));
 
         // 300s (antes 120s): 120 era muy ajustado para MFA lento (SMS demorado, aprobación
         // push tardía) — el usuario completaba el login en Azure pero el deliveryCode ya
@@ -220,12 +231,13 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private static readonly TimeSpan DeliveryCodeLifetime = TimeSpan.FromSeconds(300);
 
         public async Task<(TokenPair? Pair, string? DeliveryCode)> CompleteLoginAndIssueDeliveryCodeAsync(
-            string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null)
+            string code, string state, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null, string? reference = null)
         {
             // El codeChallenge se lee del propio parámetro "state" (Microsoft lo devuelve
             // intacto), ANTES de que HandleCallbackAsync consuma la entrada anti-replay de
             // ms_state — son cachés distintas, no hay conflicto entre ambas lecturas.
             string? codeChallenge = null;
+            string? stateBrowserId = null;
             try
             {
                 var stateJson = Encoding.UTF8.GetString(Convert.FromBase64String(state));
@@ -235,6 +247,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 {
                     codeChallenge = ccProp.GetString();
                 }
+                if (stateData.TryGetProperty("browserId", out var bidProp) &&
+                    bidProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    stateBrowserId = bidProp.GetString();
+                }
             }
             catch
             {
@@ -243,7 +260,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
             // Reutiliza el método existente TAL CUAL — no se modifica su lógica de validación,
             // intercambio con Microsoft ni emisión de tokens.
-            var pair = await HandleCallbackAsync(code, state, ipAddress, userAgent, deviceInfo);
+            var pair = await HandleCallbackAsync(code, state, ipAddress, userAgent, deviceInfo, reference);
             if (pair is null) return (null, null);
 
             if (string.IsNullOrWhiteSpace(codeChallenge))
@@ -256,10 +273,43 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             var deliveryCode = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
             _cache.Set(
                 $"delivery:{deliveryCode}",
-                new DeliveryCodeEntry { Pair = pair, CodeChallenge = codeChallenge },
+                new DeliveryCodeEntry { Pair = pair, CodeChallenge = codeChallenge, BrowserId = stateBrowserId },
                 DeliveryCodeLifetime);
 
+            if (PendingClaimEnabled && !string.IsNullOrWhiteSpace(stateBrowserId))
+                _cache.Set(PendingKey(stateBrowserId, codeChallenge), deliveryCode, DeliveryCodeLifetime);
+
             return (pair, deliveryCode);
+        }
+
+        public string? ClaimPendingDelivery(string browserId, string codeChallenge)
+        {
+            if (!PendingClaimEnabled || string.IsNullOrWhiteSpace(browserId) || string.IsNullOrWhiteSpace(codeChallenge))
+                return null;
+
+            if (_cache.TryGetValue(PendingKey(browserId, codeChallenge), out string? deliveryCode)
+                && !string.IsNullOrEmpty(deliveryCode)
+                && _cache.TryGetValue($"delivery:{deliveryCode}", out DeliveryCodeEntry? entry) && entry is not null)
+            {
+                _logger.LogInformation("[AZURE-LOGIN] Login pendiente reclamado por la pestaña (el aviso de entrega no había llegado).");
+                return deliveryCode;
+            }
+            return null;
+        }
+
+        public async Task RecordLoginFailureAsync(string reason, string? email, string? reference, string? ipAddress, string? userAgent, string? deviceInfo)
+        {
+            try
+            {
+                var detail = $"{reason} ref={reference ?? "-"}" + (string.IsNullOrWhiteSpace(email) ? "" : $" email={email}");
+                if (detail.Length > 300) detail = detail[..300];
+                await _auth.InsertLoginAsync(null, email ?? "", false, "AzureAD", "Failed", detail, null, ipAddress, userAgent, deviceInfo);
+            }
+            catch (Exception ex)
+            {
+                // Es constancia de auditoría: si falla no debe tapar el error original del login.
+                _logger.LogError(ex, "[AZURE-LOGIN] No se pudo registrar el intento fallido en el historial de acceso.");
+            }
         }
 
         public Task<TokenPair?> ExchangeDeliveryCodeAsync(string deliveryCode, string codeVerifier)
@@ -296,6 +346,8 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
             // Un solo uso: se retira de la caché apenas se valida correctamente.
             _cache.Remove(cacheKey);
+            if (!string.IsNullOrWhiteSpace(entry.BrowserId))
+                _cache.Remove(PendingKey(entry.BrowserId, entry.CodeChallenge));
             return Task.FromResult<TokenPair?>(entry.Pair);
         }
 

@@ -44,6 +44,9 @@ class AzureAdSettings(BaseModel):
     client_secret_file: Path | None = None
     redirect_uri: str | None = None
     secure_token_delivery: bool = True
+    # Reclamo del login pendiente (POST /azure/claim): permite a la pestana recuperar su
+    # deliveryCode si el aviso de entrega no le llego. Interruptor para apagarlo sin tocar codigo.
+    pending_claim_enabled: bool = True
     allowed_domain: str | None = None
     # Pagina de HrFrontend (mismo origen que la pestana que abrio el popup) a la
     # que se redirige el popup tras el callback, para avisar via BroadcastChannel
