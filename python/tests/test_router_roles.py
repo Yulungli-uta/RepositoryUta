@@ -106,3 +106,22 @@ def test_delete_role_soft_deletes(client, sqlite_session) -> None:
     assert response.status_code == 200
     sqlite_session.expire(role)
     assert sqlite_session.get(Role, role.id).is_deleted is True
+
+
+def test_list_roles_search_filters_and_keeps_pagination_shape(client, sqlite_session) -> None:
+    sqlite_session.add_all(
+        [
+            Role(name="R_RH", description="Talento Humano", priority=50),
+            Role(name="R_GUARDIAS", description="Guardias", priority=60),
+        ]
+    )
+    sqlite_session.flush()
+
+    response = client.get("/api/roles?search=talento&page=1&pageSize=10", headers=_admin_header())
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert [r["name"] for r in data["items"]] == ["R_RH"]
+    assert data["totalCount"] == 1
+    assert data["page"] == 1 and data["pageSize"] == 10
+    assert data["totalPages"] == 1 and data["hasNextPage"] is False and data["hasPreviousPage"] is False

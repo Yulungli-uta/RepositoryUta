@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Security.Claims;
 using MapsterMapper;
 using Microsoft.AspNetCore.Http;
@@ -38,6 +39,11 @@ public class UserRoleService : ICrudService<UserRole, CreateUserRoleDto, UpdateU
 
     public Task<PagedResult<UserRole>> ListAsync(int page, int pageSize, CancellationToken ct = default) =>
         _userRoleRepo.GetPagedAsync(page, pageSize, ct);
+
+    public Task<PagedResult<UserRole>> ListAsync(
+        Expression<Func<UserRole, bool>>? predicate, int page, int pageSize,
+        CancellationToken ct = default, Expression<Func<UserRole, object>>? orderBy = null, bool ascending = true) =>
+        _userRoleRepo.GetPagedAsync(predicate, page, pageSize, ct, orderBy, ascending);
 
     public Task<UserRole?> GetAsync(params object[] key) =>
         _userRoleRepo.GetAsync(key);
