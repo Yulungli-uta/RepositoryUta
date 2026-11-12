@@ -31,6 +31,18 @@ using WsSeguUta.AuthSystem.API.Services.Interfaces;
 var builder = WebApplication.CreateBuilder(args);
 
 // =========================================================
+// Piso mínimo del thread pool
+// =========================================================
+// Las consultas a AD local (LDAP, ver LocalAdDirectoryService) son síncronas envueltas
+// en Task.Run — cada login concurrente que las dispara retiene un hilo del thread pool
+// mientras espera la respuesta. El piso por defecto de .NET escala lento ante una ráfaga
+// repentina (más ráfagas esperadas con ~2000 usuarios reales), lo que se siente como
+// lentitud generalizada justo cuando más gente entra a la vez. Se sube el piso sin forzar
+// la creación de hilos de más (solo evita la rampa lenta); nunca se baja un piso ya mayor.
+ThreadPool.GetMinThreads(out var minWorkerThreads, out var minCompletionPortThreads);
+ThreadPool.SetMinThreads(Math.Max(minWorkerThreads, 200), Math.Max(minCompletionPortThreads, 200));
+
+// =========================================================
 // Config: appsettings.json en ubicación personalizada
 // =========================================================
 builder.Host.ConfigureAppConfiguration((hostingContext, config) =>
@@ -130,6 +142,12 @@ builder.Services.AddCors(opt =>
 // =========================================================
 // Rate Limiting
 // =========================================================
+// Protege /login (contraseña local) y /azure/exchange (código PKCE de un solo uso) de
+// fuerza bruta real, sin castigar a usuarios legítimos detrás de la misma salida de red
+// (NAT de campus — con ~2000 personas reales, varias comparten IP). 6/min con cola 0
+// rechazaba en seco al 7º intento en esa IP en ese minuto, sin importar si eran 7
+// personas distintas. Ajustado 2026-10-01: límite más alto + cola corta para absorber
+// ráfagas breves en vez de rechazarlas de inmediato.
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("login", httpContext =>
@@ -137,7 +155,20 @@ builder.Services.AddRateLimiter(options =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon",
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 6,
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 10,
+                AutoReplenishment = true
+            }
+        ));
+
+    // Reclamo del login pendiente: la pestaña lo consulta al recuperar el foco o reconectarse
+    options.AddPolicy("claim", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 60,
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
                 AutoReplenishment = true
@@ -219,6 +250,12 @@ builder.Services.AddScoped<IUserPermissionRepository, UserPermissionRepository>(
 builder.Services.AddScoped<IApplicationRepository, ApplicationRepository>();
 builder.Services.AddScoped<IClientApplicationService, ClientApplicationService>();
 
+// Reloj central (estándar "Fecha y hora UTA": hora de Ecuador, la decide el servidor)
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IAppClock, AppClock>();
+builder.Services.AddScoped<IUserActivityService, UserActivityService>();
+builder.Services.AddScoped<IUserAccessService, UserAccessService>();
+builder.Services.AddHostedService<SessionHousekeepingService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAzureAuthService, AzureAuthService>();

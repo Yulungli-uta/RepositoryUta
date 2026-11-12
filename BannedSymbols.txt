@@ -1,0 +1,8 @@
+# Estándar "Fecha y hora UTA": la hora de negocio es hora de Ecuador y la decide el servidor mediante IAppClock.
+# UTC solo se usa en el borde con sistemas externos que lo exigen (JWT, Microsoft) y ahí se obtiene de IAppClock.UtcNow.
+P:System.DateTime.UtcNow;Usa IAppClock (Now/Today): el estándar del sistema es hora de Ecuador, no UTC
+P:System.DateTimeOffset.UtcNow;Usa IAppClock.UtcNow / NowOffset
+M:System.DateTime.ToUniversalTime();Usa IAppClock: no se convierte la hora de negocio a UTC
+M:System.DateTimeOffset.ToUniversalTime();Usa IAppClock.UtcNow si hace falta UTC en el borde con un sistema externo
+P:System.DateTime.Now;Usa IAppClock.Now (inyectado). Excepciones documentadas en .editorconfig
+P:System.DateTime.Today;Usa IAppClock.Today (inyectado). Excepciones documentadas en .editorconfig

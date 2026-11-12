@@ -23,6 +23,8 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
     private const int BulkMaxConcurrency = 5;
     private const int CompletePendingConcurrency = 3;
 
+    private readonly IAppClock _clock;
+
     public EmployeeProvisioningService(
         AuthDbContext context,
         IIdentityProviderResolver resolver,
@@ -31,8 +33,10 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
         IInstitutionalEmailGenerator emailGenerator,
         IOptions<LocalAdOptions> adOpts,
         IOptions<ProvisioningOptions> provOpts,
-        ILogger<EmployeeProvisioningService> logger)
+        ILogger<EmployeeProvisioningService> logger,
+        IAppClock clock)
     {
+        _clock = clock;
         _context        = context;
         _resolver       = resolver;
         _azureMgmt      = azureMgmt;
@@ -209,7 +213,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
         record.ProvisioningStatusId = (int)ProvisioningStatus.Requested;
         record.ProvisioningStatusName = nameof(ProvisioningStatus.Requested);
         record.ErrorMessage = null;
-        record.UpdatedAt = DateTime.Now;
+        record.UpdatedAt = _clock.Now;
         await _context.SaveChangesAsync(ct);
 
         await DoProvisionAsync(record, req, ct);
@@ -264,7 +268,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
             }
 
             record.LocalAdObjectId = created.Id;
-            record.ProvisionedAt   = DateTime.Now;
+            record.ProvisionedAt   = _clock.Now;
 
             // Si el CN tuvo que ajustarse por conflicto, se persiste como aviso (no como error)
             // El estado sigue siendo CreatedInLocalAd — la cuenta fue creada correctamente
@@ -392,7 +396,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
             {
                 UserId     = userId,
                 RoleId     = role.Id,
-                AssignedAt = DateTime.Now,
+                AssignedAt = _clock.Now,
                 AssignedBy = "Provisioning-Automatico",
                 Reason     = "Asignación automática al aprovisionar cuenta institucional"
             });
@@ -460,7 +464,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
             DisplayName = displayName,
             UserType = "AzureAD",
             IsActive = true,
-            CreatedAt = DateTime.Now
+            CreatedAt = _clock.Now
         };
         _context.Users.Add(user);
         await _context.SaveChangesAsync(ct);
@@ -478,7 +482,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
             EmployeeEmail = email,
             HrEmployeeId = hrEmployeeId,
             IsActive = true,
-            SyncDate = DateTime.Now,
+            SyncDate = _clock.Now,
             Notes = $"Aprovisionado desde HrSystem (EmployeeId={hrEmployeeId})"
         });
         await _context.SaveChangesAsync(ct);
@@ -628,8 +632,8 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
         record.ProvisioningStatusId = (int)status;
         record.ProvisioningStatusName = status.ToString();
         record.ErrorMessage = message;
-        record.UpdatedAt = DateTime.Now;
-        record.LastCheckedAt = DateTime.Now;
+        record.UpdatedAt = _clock.Now;
+        record.LastCheckedAt = _clock.Now;
         await _context.SaveChangesAsync(ct);
     }
 
@@ -644,7 +648,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
         return string.IsNullOrWhiteSpace(domain) ? "uta.edu.ec" : domain.ToLowerInvariant();
     }
 
-    private static UserProvisioning CreateInitialRecord(ProvisionEmployeeRequest req) => new()
+    private UserProvisioning CreateInitialRecord(ProvisionEmployeeRequest req) => new()
     {
         Id = Guid.NewGuid(),
         HrEmployeeId = req.HrEmployeeId,
@@ -660,7 +664,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
         ProvisioningStatusId = (int)ProvisioningStatus.Requested,
         ProvisioningStatusName = nameof(ProvisioningStatus.Requested),
         SourceReference = req.SourceReference,
-        CreatedAt = DateTime.Now
+        CreatedAt = _clock.Now
     };
 
     // ── Completar aprovisionamiento (Entra sync → licencia) ───────────────────
@@ -732,8 +736,8 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
     /// </summary>
     private async Task DoCompleteAsync(UserProvisioning record, CancellationToken ct)
     {
-        record.LastCheckedAt = DateTime.Now;
-        record.UpdatedAt = DateTime.Now;
+        record.LastCheckedAt = _clock.Now;
+        record.UpdatedAt = _clock.Now;
 
         // 1. Verificar estado de sincronización en Entra
         EntraSyncResult sync;
@@ -791,7 +795,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
         if (licenseResult.Success)
         {
             record.LicenseSkuId = licenseResult.SkuPartNumber;
-            record.LicenseAssignedAt = DateTime.Now;
+            record.LicenseAssignedAt = _clock.Now;
             record.ProvisioningStatusId = (int)ProvisioningStatus.LicenseAssigned;
             record.ProvisioningStatusName = nameof(ProvisioningStatus.LicenseAssigned);
             record.ErrorMessage = null;
@@ -805,7 +809,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
             _logger.LogWarning("Fallo al asignar licencia a {Email}: {Error}", record.Email, licenseResult.Message);
         }
 
-        record.UpdatedAt = DateTime.Now;
+        record.UpdatedAt = _clock.Now;
         await _context.SaveChangesAsync(ct);
     }
 
@@ -827,7 +831,7 @@ public class EmployeeProvisioningService : IEmployeeProvisioningService
 
         await dir.ChangeUserPasswordAsync(record.LocalAdObjectId, newPassword, forcePasswordChange: true, ct);
 
-        record.UpdatedAt = DateTime.Now;
+        record.UpdatedAt = _clock.Now;
         await _context.SaveChangesAsync(ct);
 
         _logger.LogInformation(

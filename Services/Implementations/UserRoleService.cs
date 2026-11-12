@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Security.Claims;
 using MapsterMapper;
 using Microsoft.AspNetCore.Http;
@@ -20,12 +21,16 @@ public class UserRoleService : ICrudService<UserRole, CreateUserRoleDto, UpdateU
     private readonly IMapper _map;
     private readonly IHttpContextAccessor _http;
 
+    private readonly IAppClock _clock;
+
     public UserRoleService(
         IGenericRepository<UserRole> userRoleRepo,
         IGenericRepository<RoleChangeHistory> historyRepo,
         IMapper map,
-        IHttpContextAccessor http)
+        IHttpContextAccessor http,
+        IAppClock clock)
     {
+        _clock = clock;
         _userRoleRepo = userRoleRepo;
         _historyRepo  = historyRepo;
         _map          = map;
@@ -34,6 +39,11 @@ public class UserRoleService : ICrudService<UserRole, CreateUserRoleDto, UpdateU
 
     public Task<PagedResult<UserRole>> ListAsync(int page, int pageSize, CancellationToken ct = default) =>
         _userRoleRepo.GetPagedAsync(page, pageSize, ct);
+
+    public Task<PagedResult<UserRole>> ListAsync(
+        Expression<Func<UserRole, bool>>? predicate, int page, int pageSize,
+        CancellationToken ct = default, Expression<Func<UserRole, object>>? orderBy = null, bool ascending = true) =>
+        _userRoleRepo.GetPagedAsync(predicate, page, pageSize, ct, orderBy, ascending);
 
     public Task<UserRole?> GetAsync(params object[] key) =>
         _userRoleRepo.GetAsync(key);
@@ -47,7 +57,7 @@ public class UserRoleService : ICrudService<UserRole, CreateUserRoleDto, UpdateU
     /// </summary>
     public async Task<UserRole> CreateAsync(CreateUserRoleDto dto)
     {
-        var now = DateTime.Now;
+        var now = _clock.Now;
         var existing = await _userRoleRepo.Query()
             .FirstOrDefaultAsync(x => x.UserId == dto.UserId && x.RoleId == dto.RoleId);
 
@@ -128,7 +138,7 @@ public class UserRoleService : ICrudService<UserRole, CreateUserRoleDto, UpdateU
             ChangeType       = "Revoked",
             ChangedBy        = GetCurrentUserEmail(),
             PreviousValue    = existing.RoleId.ToString(),
-            EffectiveFrom    = DateTime.Now,
+            EffectiveFrom    = _clock.Now,
             ApprovalRequired = false,
         });
 

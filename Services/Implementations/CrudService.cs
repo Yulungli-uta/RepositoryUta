@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using MapsterMapper;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
@@ -19,6 +20,11 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
         public Task<PagedResult<TEntity>> ListAsync(int page, int pageSize, CancellationToken ct = default) =>
             _repo.GetPagedAsync(page, pageSize, ct);
+
+        public Task<PagedResult<TEntity>> ListAsync(
+            Expression<Func<TEntity, bool>>? predicate, int page, int pageSize,
+            CancellationToken ct = default, Expression<Func<TEntity, object>>? orderBy = null, bool ascending = true) =>
+            _repo.GetPagedAsync(predicate, page, pageSize, ct, orderBy, ascending);
 
         public Task<TEntity?> GetAsync(params object[] key) =>
             _repo.GetAsync(key);

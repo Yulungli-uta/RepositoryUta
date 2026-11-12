@@ -13,8 +13,11 @@ public class NotificationController : ControllerBase
     private readonly INotificationService _notificationService;
     private readonly ILogger<NotificationController> _logger;
 
-    public NotificationController(INotificationService notificationService, ILogger<NotificationController> logger)
+    private readonly IAppClock _clock;
+
+    public NotificationController(INotificationService notificationService, ILogger<NotificationController> logger, IAppClock clock)
     {
+        _clock = clock;
         _notificationService = notificationService;
         _logger = logger;
     }
@@ -212,7 +215,7 @@ public class NotificationController : ControllerBase
             return Ok(new { 
                 Status = "Success", 
                 Message = "Webhook received successfully", 
-                Timestamp = DateTime.Now,
+                Timestamp = _clock.Now,
                 ReceivedPayload = payload 
             });
         }

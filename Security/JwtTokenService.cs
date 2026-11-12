@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using WsSeguUta.AuthSystem.API.Data;
+using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Security
 {
@@ -22,13 +23,17 @@ namespace WsSeguUta.AuthSystem.API.Security
         private readonly IMemoryCache _cache;
         private readonly ILogger<JwtTokenService> _logger;
 
+        private readonly IAppClock _clock;
+
         public JwtTokenService(
             IConfiguration cfg,
             RsaKeyProvider keys,
             IServiceScopeFactory scopeFactory,
             IMemoryCache cache,
-            ILogger<JwtTokenService> logger)
+            ILogger<JwtTokenService> logger,
+            IAppClock clock)
         {
+            _clock = clock;
             _keys = keys;
             _scopeFactory = scopeFactory;
             _cache = cache;
@@ -42,10 +47,10 @@ namespace WsSeguUta.AuthSystem.API.Security
             _fallbackLifetime = TimeSpan.FromMinutes(configuredMinutes is > 0 ? configuredMinutes.Value : 30);
         }
 
-        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default)
-            => CreateAsync(userId, email, roles, [], lifetime, hrEmployeeId, ct);
+        public Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default, Guid? sessionId = null)
+            => CreateAsync(userId, email, roles, [], lifetime, hrEmployeeId, ct, sessionId);
 
-        public async Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default)
+        public async Task<string> CreateAsync(Guid userId, string email, IEnumerable<string> roles, IEnumerable<string> adGroups, TimeSpan? lifetime = null, int? hrEmployeeId = null, CancellationToken ct = default, Guid? sessionId = null)
         {
             var claims = new List<Claim>
             {
@@ -59,6 +64,11 @@ namespace WsSeguUta.AuthSystem.API.Security
             claims.AddRange(adGroups.Select(g => new Claim("ad_group", g)));
             if (hrEmployeeId.HasValue)
                 claims.Add(new Claim("employeeId", hrEmployeeId.Value.ToString()));
+            // Vincula el token a una fila concreta de auth.tbl_UserSessions: sin este claim,
+            // revocar una sesión en BD no tenía ningún efecto sobre un access token ya emitido
+            // (solo bloqueaba el refresh) — ValidateTokenAsync lo usa para chequear revocación.
+            if (sessionId.HasValue)
+                claims.Add(new Claim("sid", sessionId.Value.ToString()));
 
             var effectiveLifetime = lifetime ?? await GetAccessTokenLifetimeAsync(ct);
 
@@ -66,7 +76,7 @@ namespace WsSeguUta.AuthSystem.API.Security
                 _issuer,
                 _audience,
                 claims,
-                expires: DateTime.Now.Add(effectiveLifetime),
+                expires: _clock.UtcNow.UtcDateTime.Add(effectiveLifetime),
                 signingCredentials: new SigningCredentials(_keys.SigningKey, SecurityAlgorithms.RsaSha256));
 
             return new JwtSecurityTokenHandler().WriteToken(token);
@@ -93,7 +103,7 @@ namespace WsSeguUta.AuthSystem.API.Security
                 _issuer,
                 _audience,
                 claims,
-                expires: DateTime.Now.Add(lifetime),
+                expires: _clock.UtcNow.UtcDateTime.Add(lifetime),
                 signingCredentials: new SigningCredentials(_keys.SigningKey, SecurityAlgorithms.RsaSha256));
 
             return Task.FromResult(new JwtSecurityTokenHandler().WriteToken(token));

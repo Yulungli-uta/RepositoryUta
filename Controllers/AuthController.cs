@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using WsSeguUta.AuthSystem.API.Models.DTOs;
 using WsSeguUta.AuthSystem.API.Services.Interfaces;
+using WsSeguUta.AuthSystem.API.Utilities;
 using WsSeguUta.AuthSystem.API.Data.Repositories;
 using WsSeguUta.AuthSystem.API.Infrastructure.Identity.Contracts;
 using System.Net;
@@ -20,6 +21,8 @@ public class AuthController : ControllerBase
     private readonly IAzureManagementService _azureMgmt;
     private readonly IUserRepository _users;
     private readonly INotificationService _notificationService;
+    private readonly IWebSocketConnectionService _wsConnections;
+    private readonly IUserActivityService _activity;
     private readonly IIdentityProviderResolver _identityResolver;
     private readonly IConfiguration _cfg;
     private readonly ILogger<AuthController> _logger;
@@ -30,6 +33,8 @@ public class AuthController : ControllerBase
         IAzureManagementService azureMgmt,
         IUserRepository users,
         INotificationService notificationService,
+        IWebSocketConnectionService wsConnections,
+        IUserActivityService activity,
         IIdentityProviderResolver identityResolver,
         IConfiguration cfg,
         ILogger<AuthController> logger)
@@ -39,6 +44,8 @@ public class AuthController : ControllerBase
         _azureMgmt = azureMgmt;
         _users = users;
         _notificationService = notificationService;
+        _wsConnections = wsConnections;
+        _activity = activity;
         _identityResolver = identityResolver;
         _cfg = cfg;
         _logger = logger;
@@ -53,7 +60,7 @@ public class AuthController : ControllerBase
         var ua = GetUserAgent();
         var device = GetDeviceInfo();
 
-        var pair = await _auth.LoginLocalAsync(req.Email, req.Password, ipAddress: ip, userAgent: ua, deviceInfo: device);
+        var pair = await _auth.LoginLocalAsync(req.Email, req.Password, ipAddress: ip, userAgent: ua, deviceInfo: device, browserId: req.BrowserId);
         return pair is null ? Unauthorized(ApiResponse.Fail("Credenciales inválidas")) : Ok(ApiResponse.Ok(pair, "Login exitoso"));
     }
 
@@ -73,26 +80,30 @@ public class AuthController : ControllerBase
     /// </summary>
     [HttpPost("logout")]
     [AllowAnonymous]
-    public async Task<IActionResult> Logout([FromBody] RefreshRequest req)
+    public async Task<IActionResult> Logout([FromBody] LogoutRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.RefreshToken))
             return BadRequest(ApiResponse.Fail("Refresh token requerido"));
 
-        await _auth.LogoutAsync(req.RefreshToken);
+        await _auth.LogoutAsync(req.RefreshToken, req.Reason);
         return Ok(ApiResponse.Ok(true, "Sesión cerrada"));
     }
 
+    // Sin EnableRateLimiting: este endpoint no valida contraseña, solo devuelve la URL
+    // de Microsoft para redirigir — no protege nada contra fuerza bruta. Limitarlo aquí
+    // solo castigaba a usuarios legítimos detrás de la misma salida de red (NAT de
+    // campus), bloqueando el primer paso del login para todos por igual.
     [HttpGet("azure/url")]
     [AllowAnonymous]
-    [EnableRateLimiting("login")]
     public async Task<IActionResult> AzureUrlGet(
         [FromQuery] string? clientId = null,
         [FromQuery] string? browserId = null,
-        [FromQuery] string? codeChallenge = null)
+        [FromQuery] string? codeChallenge = null,
+        [FromQuery] string? deviceInfo = null)
     {
         try
         {
-            var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId, codeChallenge);
+            var (url, state) = await _azure.BuildAuthUrlAsync(clientId, browserId, codeChallenge, deviceInfo);
             return Ok(ApiResponse.Ok(new
             {
                 url,
@@ -110,12 +121,11 @@ public class AuthController : ControllerBase
 
     [HttpPost("azure/url")]
     [AllowAnonymous]
-    [EnableRateLimiting("login")]
     public async Task<IActionResult> AzureUrlPost([FromBody] AzureAuthUrlRequest req)
     {
         try
         {
-            var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId, req.CodeChallenge);
+            var (url, state) = await _azure.BuildAuthUrlAsync(req.ClientId, req.BrowserId, req.CodeChallenge, req.DeviceInfo);
             return Ok(ApiResponse.Ok(new
             {
                 url,
@@ -151,16 +161,47 @@ public class AuthController : ControllerBase
             : Ok(ApiResponse.Ok(pair));
     }
 
+    /// <summary>
+    /// Reclamo del login pendiente: devuelve el deliveryCode del intento de esta pestaña si el aviso no le llegó.
+    /// Siempre responde 200; sin nada pendiente (o con el reclamo deshabilitado) el dato viene null, sin explicar el
+    /// motivo. El código solo se puede canjear con el codeVerifier que únicamente la pestaña conoce.
+    /// </summary>
+    [HttpPost("azure/claim")]
+    [AllowAnonymous]
+    [EnableRateLimiting("claim")]
+    public IActionResult AzureClaim([FromBody] AzureClaimRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.BrowserId) || string.IsNullOrWhiteSpace(req.CodeChallenge))
+            return BadRequest(ApiResponse.Fail("browserId y codeChallenge son requeridos"));
+
+        var deliveryCode = _azure.ClaimPendingDelivery(req.BrowserId, req.CodeChallenge);
+        return Ok(ApiResponse.Ok(new { deliveryCode }));
+    }
+
+    /// <summary>Referencia corta que se muestra al usuario y queda en el log y en el historial de acceso.</summary>
+    private static string NewReference() => Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+    /// <summary>Página del popup para un fallo: mensaje genérico + referencia; el motivo real queda solo en el servidor.</summary>
+    private static string FailurePopup(string title, string message, string reference, int closeMs = 5000) =>
+        $"<html><body style=\"font-family:sans-serif;text-align:center;margin-top:3em\"><h3>{title}</h3><p>{message}</p>" +
+        $"<p style=\"font-size:12px;color:#666\">Código de referencia: <b>{reference}</b></p>" +
+        $"<script>setTimeout(()=>window.close(),{closeMs});</script></body></html>";
+
     [HttpGet("azure/callback")]
     [AllowAnonymous]
-    public async Task<IActionResult> AzureCallback([FromQuery] string code, [FromQuery] string state)
+    public async Task<IActionResult> AzureCallback(
+        [FromQuery] string? code = null,
+        [FromQuery] string? state = null,
+        [FromQuery] string? error = null)
     {
         //Console.WriteLine($"*******************Azure callback received. Code: {code}, State: {state}");
         // Obtener IP del cliente
-        var clientIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var clientIp = GetClientIp();
         var userAgent = HttpContext.Request.Headers.UserAgent.ToString();
+        var deviceInfo = GetDeviceInfo();
         string? clientId = null;
         string? browserId = null;
+        var reference = NewReference();
         try
         {           
 
@@ -180,6 +221,22 @@ public class AuthController : ControllerBase
         {
             //Console.WriteLine($"****************Error decoding state: {ex.Message}. Proceeding without clientId.");
         }
+        // Microsoft redirige aquí SIN "code" y con "error" cuando el usuario pulsa "Atrás", cancela o rechaza
+        // el acceso: no es una falla del servidor. Se avisa a la pestaña que espera y se cierra la ventana con
+        // un mensaje genérico (no se refleja ni el error ni su descripción en la página).
+        if (!string.IsNullOrWhiteSpace(error) || string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
+        {
+            _logger.LogWarning(
+                "[AZURE-LOGIN] Inicio de sesión no completado en Microsoft (error={Error}). ClientId={ClientId}, BrowserId={BrowserId}",
+                string.IsNullOrWhiteSpace(error) ? "sin_code" : error, clientId, browserId);
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, AzureLoginFailureCodes.Cancelled);
+            return Content(
+                "<html><body><h3>Inicio de sesión no completado</h3><p>No se completó el inicio de sesión con Microsoft. " +
+                "Puedes cerrar esta ventana e intentarlo de nuevo.</p><script>setTimeout(()=>window.close(),1500);</script></body></html>",
+                "text/html");
+        }
+
         // Interruptor operativo: permite revertir al instante (sin recompilar) al reparto
         // directo de tokens por WebSocket si el flujo PKCE presentara algún problema en
         // producción. Default true si la clave falta o no es parseable — el valor real
@@ -192,20 +249,30 @@ public class AuthController : ControllerBase
         {
             if (secureTokenDelivery)
             {
-                (pair, deliveryCode) = await _azure.CompleteLoginAndIssueDeliveryCodeAsync(code, state);
+                (pair, deliveryCode) = await _azure.CompleteLoginAndIssueDeliveryCodeAsync(
+                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo, reference: reference);
             }
             else
             {
-                pair = await _azure.HandleCallbackAsync(code, state);
+                pair = await _azure.HandleCallbackAsync(
+                    code, state, ipAddress: clientIp, userAgent: userAgent, deviceInfo: deviceInfo, reference: reference);
             }
         }
         catch (UnauthorizedAccessException ex)
         {
+            // El motivo exacto (ex.Message) queda solo en el log: al usuario se le muestra una categoría genérica y la referencia.
             _logger.LogWarning(
-                "[AZURE-LOGIN] Callback rechazado ({Message}). ClientId={ClientId}, BrowserId={BrowserId}",
-                ex.Message, clientId, browserId);
+                "[AZURE-LOGIN] Callback rechazado ({Message}). Ref={Reference}, ClientId={ClientId}, BrowserId={BrowserId}",
+                ex.Message, reference, clientId, browserId);
+            var rejection = (ex as AzureLoginRejectedException)?.Code ?? AzureLoginFailureCodes.NoAccess;
+            if (ex is not AzureLoginRejectedException)
+                await _azure.RecordLoginFailureAsync("AZURE_REJECTED", null, reference, clientIp, userAgent, deviceInfo);
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, rejection, reference);
             return Content(
-                $"<html><body><h3>Acceso no autorizado</h3><p>{ex.Message}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
+                rejection == AzureLoginFailureCodes.ExpiredAttempt
+                    ? FailurePopup("El intento de inicio de sesión expiró", "Cierra esta ventana e intenta de nuevo.", reference)
+                    : FailurePopup("No se pudo habilitar tu acceso", "Esta cuenta no tiene acceso habilitado al sistema. Comunica el código de referencia a DITIC.", reference),
                 "text/html");
         }
         catch (Exception ex)
@@ -217,10 +284,13 @@ public class AuthController : ControllerBase
             // Azure. Ahora se responde con la misma página de cierre que el resto de casos de
             // esta acción, y el detalle real queda solo en el log (nunca se expone al cliente).
             _logger.LogError(ex,
-                "[AZURE-LOGIN] Error inesperado procesando el callback de Azure. ClientId={ClientId}, BrowserId={BrowserId}, TraceId={TraceId}",
-                clientId, browserId, HttpContext.TraceIdentifier);
+                "[AZURE-LOGIN] Error inesperado procesando el callback de Azure. Ref={Reference}, ClientId={ClientId}, BrowserId={BrowserId}, TraceId={TraceId}",
+                reference, clientId, browserId, HttpContext.TraceIdentifier);
+            await _azure.RecordLoginFailureAsync("AZURE_SERVER_ERROR", null, reference, clientIp, userAgent, deviceInfo);
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, AzureLoginFailureCodes.ServerError, reference);
             return Content(
-                $"<html><body><h3>Ocurrió un error inesperado</h3><p>No se pudo completar el inicio de sesión. Cierra esta ventana e intenta de nuevo.</p><p style=\"font-size:11px;color:#888\">Referencia: {HttpContext.TraceIdentifier}</p><script>setTimeout(()=>window.close(),3000);</script></body></html>",
+                FailurePopup("Ocurrió un error inesperado", "No se pudo completar el inicio de sesión. Cierra esta ventana e intenta de nuevo.", reference),
                 "text/html");
         }
         //Console.WriteLine($"******************Azure login processed. pair: {pair}, TokenPair: {(pair != null ? "Success" : "Failed")}");
@@ -309,6 +379,13 @@ public class AuthController : ControllerBase
                         // Intentar convertir a GUID si es posible, sino usar como string
                         if (Guid.TryParse(foundUserId, out var userId))
                         {
+                            // Si la pestaña que inició el login ya no tiene su conexión en tiempo real, la confirmación
+                            // no le llegará y el usuario se queda esperando: se deja constancia para dar seguimiento
+                            if (!string.IsNullOrEmpty(browserId) && !await _wsConnections.HasActiveBrowserConnectionAsync(browserId))
+                            {
+                                await _activity.LogAsync(userId, UserActivityCodes.LoginNotificationNoListener,
+                                    new { clientId, browserId }, null, clientIp, userAgent);
+                            }
                             if (!string.IsNullOrEmpty(clientId))
                             {
                                 //Console.WriteLine($"*************Notifying specific application: {clientId}");
@@ -352,7 +429,16 @@ public class AuthController : ControllerBase
             //Console.WriteLine($"***************TokenPair is null - login failed");
         }
 
-        if (pair is null) return Unauthorized(ApiResponse.Fail("No autorizado"));
+        if (pair is null)
+        {
+            // Microsoft autenticó pero no hay usuario local para esa cuenta (ya registrado en el historial de acceso).
+            // Antes el popup mostraba un JSON crudo y la pestaña no se enteraba.
+            if (!string.IsNullOrEmpty(clientId) && !string.IsNullOrEmpty(browserId))
+                await _notificationService.NotifyLoginFailedAsync(clientId, browserId, AzureLoginFailureCodes.NoAccess, reference);
+            return Content(
+                FailurePopup("No se pudo habilitar tu acceso", "Esta cuenta no tiene acceso habilitado al sistema. Comunica el código de referencia a DITIC.", reference),
+                "text/html");
+        }
 
         // Retornar HTML que cierra la ventana popup
         var html = @"
@@ -588,24 +674,7 @@ public class AuthController : ControllerBase
         }
     }
 
-    private string? GetClientIp()
-    {
-        // Si estás detrás de proxy / gateway, esto suele venir poblado
-        var xff = Request.Headers["X-Forwarded-For"].ToString();
-        if (!string.IsNullOrWhiteSpace(xff))
-            return xff.Split(',')[0].Trim();
-
-        var xRealIp = Request.Headers["X-Real-IP"].ToString();
-        if (!string.IsNullOrWhiteSpace(xRealIp))
-            return xRealIp.Trim();
-
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-
-        // Normaliza loopback IPv6 a 127.0.0.1 (útil en dev)
-        if (ip == "::1") return "127.0.0.1";
-
-        return ip;
-    }
+    private string? GetClientIp() => ClientRequestInfo.GetClientIp(HttpContext);
 
     private string? GetUserAgent()
         => Request.Headers["User-Agent"].ToString();

@@ -1,7 +1,10 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 
 import pyodbc
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.orm import Session, sessionmaker
 
 from repositoryuta.config import get_settings
 
@@ -41,3 +44,28 @@ def dispose_engine() -> None:
     engine = get_engine()
     if engine is not None:
         engine.dispose()
+
+
+def get_session_factory() -> sessionmaker[Session]:
+    engine = get_engine()
+    if engine is None:
+        raise RuntimeError("No hay motor de base de datos configurado (DATABASE_URL_FILE).")
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+@contextmanager
+def session_scope() -> Iterator[Session]:
+    """Una transaccion por unidad de trabajo: commit si todo sale bien, rollback
+    si no. Los repositorios reciben la Session ya abierta — nunca crean la suya,
+    ni hacen commit ellos mismos (eso es responsabilidad de quien orquesta la
+    unidad de trabajo, tipicamente un servicio de Fase 4).
+    """
+    session = get_session_factory()()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

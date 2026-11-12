@@ -12,8 +12,11 @@ namespace WsSeguUta.AuthSystem.API.Hubs
         private readonly IWebSocketConnectionService _connectionService;
         private readonly ILogger<NotificationHub> _logger;
 
-        public NotificationHub(IWebSocketConnectionService connectionService, ILogger<NotificationHub> logger)
+        private readonly IAppClock _clock;
+
+        public NotificationHub(IWebSocketConnectionService connectionService, ILogger<NotificationHub> logger, IAppClock clock)
         {
+            _clock = clock;
             _connectionService = connectionService;
             _logger = logger;
         }
@@ -45,7 +48,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 {
                     clientId,
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.Now,
+                    timestamp = _clock.Now,
                     message = $"Successfully joined notifications for {clientId}"
                 });
             }
@@ -91,7 +94,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                     clientId,
                     browserId,
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.Now,
+                    timestamp = _clock.Now,
                     message = $"Successfully joined browser group for {browserId}"
                 });
             }
@@ -127,7 +130,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 {
                     clientId,
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.Now,
+                    timestamp = _clock.Now,
                     message = $"Successfully left notifications for {clientId}"
                 });
             }
@@ -149,7 +152,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 await _connectionService.UpdateLastPingAsync(Context.ConnectionId);
                 await Clients.Caller.SendAsync("Pong", new
                 {
-                    timestamp = DateTime.Now,
+                    timestamp = _clock.Now,
                     connectionId = Context.ConnectionId
                 });
             }
@@ -172,7 +175,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 {
                     connectionId = Context.ConnectionId,
                     isActive,
-                    timestamp = DateTime.Now
+                    timestamp = _clock.Now
                 });
             }
             catch (Exception ex)
@@ -227,7 +230,7 @@ namespace WsSeguUta.AuthSystem.API.Hubs
                 await Clients.Caller.SendAsync("Connected", new
                 {
                     connectionId = Context.ConnectionId,
-                    timestamp = DateTime.Now,
+                    timestamp = _clock.Now,
                     message = "WebSocket connection established",
                     clientInfo,
                     clientId,
