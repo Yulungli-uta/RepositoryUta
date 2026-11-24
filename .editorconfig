@@ -1,0 +1,9 @@
+root = true
+
+# Estándar "Fecha y hora UTA": BannedSymbols.txt prohíbe DateTime.Now/Today/UtcNow (RS0030 = error); se usa IAppClock.
+[*.cs]
+dotnet_diagnostic.RS0030.severity = error
+
+# Excepción: Models/** (entidades y DTOs) son valores por defecto de propiedades, sin inyección de dependencias.
+[Models/**.cs]
+dotnet_diagnostic.RS0030.severity = none

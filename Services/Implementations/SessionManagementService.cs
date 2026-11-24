@@ -18,13 +18,17 @@ public class SessionManagementService : ISessionManagementService
     private readonly IAuditService _audit;
     private readonly ILogger<SessionManagementService> _logger;
 
+    private readonly IAppClock _clock;
+
     public SessionManagementService(
         AuthDbContext context,
         IHubContext<NotificationHub> hub,
         ITokenService tokenService,
         IAuditService audit,
-        ILogger<SessionManagementService> logger)
+        ILogger<SessionManagementService> logger,
+        IAppClock clock)
     {
+        _clock = clock;
         _context = context;
         _hub = hub;
         _tokenService = tokenService;
@@ -71,7 +75,7 @@ public class SessionManagementService : ISessionManagementService
         // 1. Marcar sesión como revocada en BD
         session.IsActive      = false;
         session.Status        = "Revoked";
-        session.RevokedAt     = DateTime.Now;
+        session.RevokedAt     = _clock.Now;
         session.RevokedBy     = revokedBy;
 
         // 2. Buscar conexión WS activa vinculada por BrowserId
@@ -92,7 +96,7 @@ public class SessionManagementService : ISessionManagementService
                             eventType  = "ForceLogout",
                             sessionId  = sessionId.ToString(),
                             reason     = "Sesión revocada por administrador",
-                            timestamp  = DateTime.Now.ToString("o"),
+                            timestamp  = _clock.Now.ToString("o"),
                             revokedBy,
                         }, ct);
                     notified = true;
@@ -139,7 +143,7 @@ public class SessionManagementService : ISessionManagementService
         {
             session.IsActive  = false;
             session.Status    = "Revoked";
-            session.RevokedAt = DateTime.Now;
+            session.RevokedAt = _clock.Now;
             session.RevokedBy = revokedBy;
 
             if (!string.IsNullOrEmpty(session.BrowserId))
@@ -158,7 +162,7 @@ public class SessionManagementService : ISessionManagementService
                                 eventType = "ForceLogout",
                                 sessionId = session.SessionId.ToString(),
                                 reason    = "Todas las sesiones revocadas por administrador",
-                                timestamp = DateTime.Now.ToString("o"),
+                                timestamp = _clock.Now.ToString("o"),
                                 revokedBy,
                             }, ct);
                         notified++;
@@ -221,12 +225,12 @@ public class SessionManagementService : ISessionManagementService
             ?? throw new InvalidOperationException($"Aplicación {applicationId} no encontrada.");
 
         app.IsActive    = !app.IsActive;
-        app.ModifiedAt  = DateTime.Now;
+        app.ModifiedAt  = _clock.Now;
         app.ModifiedBy  = changedBy;
 
         if (!app.IsActive)
         {
-            app.SuspendedAt = DateTime.Now;
+            app.SuspendedAt = _clock.Now;
             app.SuspendedBy = changedBy;
         }
         else
@@ -265,9 +269,9 @@ public class SessionManagementService : ISessionManagementService
         var newSecretHash = _tokenService.Hash(newSecret);
 
         app.ClientSecretHash = newSecretHash;
-        app.SecretRotatedAt  = DateTime.Now;
+        app.SecretRotatedAt  = _clock.Now;
         app.SecretRotatedBy  = rotatedBy;
-        app.ModifiedAt       = DateTime.Now;
+        app.ModifiedAt       = _clock.Now;
         app.ModifiedBy       = rotatedBy;
 
         await _context.SaveChangesAsync(ct);

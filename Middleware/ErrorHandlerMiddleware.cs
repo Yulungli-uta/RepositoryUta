@@ -1,6 +1,7 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
 using System.Text.Json;
+using WsSeguUta.AuthSystem.API.Services.Interfaces;
 
 namespace WsSeguUta.AuthSystem.API.Middleware
 {
@@ -16,8 +17,11 @@ namespace WsSeguUta.AuthSystem.API.Middleware
     private readonly RequestDelegate _next;
     private readonly ILogger<ErrorHandlerMiddleware> _logger;
 
-    public ErrorHandlerMiddleware(RequestDelegate next, ILogger<ErrorHandlerMiddleware> logger)
+    private readonly IAppClock _clock;
+
+    public ErrorHandlerMiddleware(RequestDelegate next, ILogger<ErrorHandlerMiddleware> logger, IAppClock clock)
     {
+        _clock = clock;
       _next = next;
       _logger = logger;
     }
@@ -62,7 +66,7 @@ namespace WsSeguUta.AuthSystem.API.Middleware
               : $"Ocurrió un error inesperado. Referencia: {traceId}"
           },
           traceId,
-          timestamp = DateTime.Now
+          timestamp = _clock.Now
         });
 
         await context.Response.WriteAsync(body);

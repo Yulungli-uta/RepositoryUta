@@ -26,12 +26,16 @@ public class AzureManagementService : IAzureManagementService
     private readonly AuthDbContext _context;
     private readonly ILogger<AzureManagementService> _logger;
 
+    private readonly IAppClock _clock;
+
     public AzureManagementService(
         GraphServiceClient graphClient,
         IAzureAdRepository azureAdRepo,
         AuthDbContext context,
-        ILogger<AzureManagementService> logger)
+        ILogger<AzureManagementService> logger,
+        IAppClock clock)
     {
+        _clock = clock;
         _graphClient = graphClient;
         _azureAdRepo = azureAdRepo;
         _context = context;
@@ -108,7 +112,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = createdUser.Id,
                 NewValues = System.Text.Json.JsonSerializer.Serialize(new { dto.Email, dto.DisplayName }),
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -232,7 +236,7 @@ public class AzureManagementService : IAzureManagementService
                     Module = "AzureManagement",
                     EntityId = azureObjectId,
                     NewValues = System.Text.Json.JsonSerializer.Serialize(dto),
-                    Timestamp = DateTime.Now
+                    Timestamp = _clock.Now
                 });
 
                 await _context.SaveChangesAsync();
@@ -261,7 +265,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
                 NewValues = $"AccountEnabled: {enable}",
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
 
             await _context.SaveChangesAsync();
@@ -286,7 +290,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
                 NewValues = $"PermanentDelete: {permanentDelete}",
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
 
             await _context.SaveChangesAsync();
@@ -412,7 +416,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
                 NewValues = $"ForceChange: {forceChange}",
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
 
             await _context.SaveChangesAsync();
@@ -451,7 +455,7 @@ public class AzureManagementService : IAzureManagementService
                 Action = "ChangePasswordAzureUser",
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
 
             await _context.SaveChangesAsync();
@@ -632,7 +636,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
                 NewValues = $"RoleId: {roleId}",
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -657,7 +661,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
                 OldValues = $"RoleId: {roleId}",
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -738,7 +742,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = createdGroup.Id,
                 NewValues = System.Text.Json.JsonSerializer.Serialize(new { dto.DisplayName, dto.GroupType }),
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -821,7 +825,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = groupId,
                 NewValues = System.Text.Json.JsonSerializer.Serialize(dto),
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -845,7 +849,7 @@ public class AzureManagementService : IAzureManagementService
                 Action = "DeleteAzureGroup",
                 Module = "AzureManagement",
                 EntityId = groupId,
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -927,7 +931,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
                 NewValues = $"GroupId: {groupId}",
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -952,7 +956,7 @@ public class AzureManagementService : IAzureManagementService
                 Module = "AzureManagement",
                 EntityId = azureObjectId,
                 OldValues = $"GroupId: {groupId}",
-                Timestamp = DateTime.Now
+                Timestamp = _clock.Now
             });
             await _context.SaveChangesAsync();
 
@@ -1144,7 +1148,7 @@ public class AzureManagementService : IAzureManagementService
                     GroupsCreated: 0,
                     GroupsUpdated: 0,
                     Errors: errors,
-                    SyncDateTime: DateTime.Now,
+                    SyncDateTime: _clock.Now,
                     Duration: stopwatch.Elapsed
                 );
             }
@@ -1179,7 +1183,7 @@ public class AzureManagementService : IAzureManagementService
                 GroupsCreated: 0,
                 GroupsUpdated: 0,
                 Errors: errors,
-                SyncDateTime: DateTime.Now,
+                SyncDateTime: _clock.Now,
                 Duration: stopwatch.Elapsed
             );
         }
@@ -1198,7 +1202,7 @@ public class AzureManagementService : IAzureManagementService
                 GroupsCreated: 0,
                 GroupsUpdated: 0,
                 Errors: errors,
-                SyncDateTime: DateTime.Now,
+                SyncDateTime: _clock.Now,
                 Duration: stopwatch.Elapsed
             );
         }

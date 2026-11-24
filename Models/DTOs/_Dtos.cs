@@ -4,10 +4,12 @@ public record ApiResponse(bool Success, object? Data, string? Message, IEnumerab
 { public static ApiResponse Ok(object? data=null, string? message=null) => new(true, data, message, null, DateTime.Now);
   public static ApiResponse Fail(string message, IEnumerable<string>? errors=null) => new(false, null, message, errors, DateTime.Now); }
 
-public record AzureAuthUrlRequest(string? ClientId = null, string? BrowserId = null, string? CodeChallenge = null);
+public record AzureAuthUrlRequest(string? ClientId = null, string? BrowserId = null, string? CodeChallenge = null, string? DeviceInfo = null);
 
-public record LoginRequest(string Email, string Password);
+public record LoginRequest(string Email, string Password, string? BrowserId = null);
 public record RefreshRequest(string RefreshToken);
+/// <summary>Cierre de sesión; Reason es opcional y solo se acepta de una lista cerrada (ver UserActivityCodes).</summary>
+public record LogoutRequest(string RefreshToken, string? Reason = null);
 public record TokenPair(string AccessToken, string RefreshToken);
 
 /// <summary>
@@ -16,6 +18,7 @@ public record TokenPair(string AccessToken, string RefreshToken);
 /// que inició el login con Office 365.
 /// </summary>
 public record AzureExchangeRequest(string DeliveryCode, string CodeVerifier);
+public record AzureClaimRequest(string BrowserId, string CodeChallenge);
 
 // Users
 // HrEmployeeId es obligatorio por el mismo motivo que en CreateUserEmployeeDto (ver nota abajo):

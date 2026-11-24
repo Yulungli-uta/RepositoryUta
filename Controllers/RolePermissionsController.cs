@@ -42,14 +42,26 @@ public class RolePermissionsController : ControllerBase
         if (roles is null || roles.Length == 0)
             return Ok(ApiResponse.Ok(Array.Empty<string>()));
 
-        var codes = await (
+        var pairs = await (
             from ur in _db.Roles
             where roles.Contains(ur.Name) && ur.IsActive && !ur.IsDeleted
             join rp in _db.RolePermissions on ur.Id equals rp.RoleId
             join p in _db.Permissions on rp.PermissionId equals p.Id
             where !p.IsDeleted
-            select (p.Module + "." + p.Action).ToUpper()
+            select new { ModuleAction = p.Module + "." + p.Action, p.Name }
         ).Distinct().ToListAsync(ct);
+
+        // Union de "MODULO.ACCION" (forma historica, la que ya consume HrBackend) con el Name
+        // completo del permiso. Para el 99% de los permisos Name == Module.Action, asi que esto
+        // es un no-op (Distinct los colapsa). Pero un modulo como DINARDAP puede tener varios
+        // permisos que comparten Module+Action a proposito (evita ampliar el CHECK de acciones) y
+        // solo se distinguen por Name (ej. DINARDAP.REGISTRO_CIVIL.READ vs DINARDAP.TCE.READ) - sin
+        // el Name, esos quedaban indistinguibles y ningun consumidor podia pedir el permiso fino.
+        var codes = pairs
+            .SelectMany(p => new[] { p.ModuleAction, p.Name })
+            .Select(c => c.ToUpperInvariant())
+            .Distinct()
+            .ToList();
 
         return Ok(ApiResponse.Ok(codes));
     }

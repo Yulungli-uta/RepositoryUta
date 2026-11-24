@@ -15,8 +15,11 @@ public class AuditService : IAuditService
     private readonly IGenericRepository<AuditLog> _auditRepo;
     private readonly IHttpContextAccessor _http;
 
-    public AuditService(IGenericRepository<AuditLog> auditRepo, IHttpContextAccessor http)
+    private readonly IAppClock _clock;
+
+    public AuditService(IGenericRepository<AuditLog> auditRepo, IHttpContextAccessor http, IAppClock clock)
     {
+        _clock = clock;
         _auditRepo = auditRepo;
         _http      = http;
     }
@@ -43,7 +46,7 @@ public class AuditService : IAuditService
             UserId     = resolvedUserId,
             IpAddress  = context?.Connection.RemoteIpAddress?.ToString(),
             UserAgent  = context?.Request.Headers.UserAgent.ToString(),
-            Timestamp  = DateTime.Now,
+            Timestamp  = _clock.Now,
         };
 
         await _auditRepo.AddAsync(entry);

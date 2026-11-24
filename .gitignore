@@ -36,6 +36,10 @@ logs/
 # === CONFIGURACIONES SENSIBLES / ENTORNO ===
 .env
 .env.*
+*.pem
+*.key
+*.pfx
+*.p12
 **/appsettings.json
 Configuration/appsettings.json
 appsettings.Development.json
@@ -53,6 +57,7 @@ python/.coverage
 python/htmlcov/
 python/__pycache__/
 python/**/*.pyc
+python/secrets/
 
 # Claude local config
 .claude/

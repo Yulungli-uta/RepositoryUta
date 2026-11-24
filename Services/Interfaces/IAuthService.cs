@@ -4,9 +4,9 @@ namespace WsSeguUta.AuthSystem.API.Services.Interfaces
 {
     public interface IAuthService
     {
-        Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null);
+        Task<TokenPair?> LoginLocalAsync(string email, string password, string? ipAddress = null, string? userAgent = null, string? deviceInfo = null, string? browserId = null);
         Task<TokenPair?> RefreshAsync(string refreshToken);
-        Task<bool> LogoutAsync(string refreshToken);
+        Task<bool> LogoutAsync(string refreshToken, string? reason = null);
         Task<object?> MeAsync(Guid userId);
         Task<ValidateTokenResponse> ValidateTokenAsync(string token, string? clientId);
         Task<ChangePasswordResponse> ChangePasswordAsync(Guid userId, string currentPassword, string newPassword);

@@ -11,11 +11,15 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         private readonly ILogger<WebSocketConnectionService> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
 
+        private readonly IAppClock _clock;
+
         public WebSocketConnectionService(
             AuthDbContext context,
             ILogger<WebSocketConnectionService> logger,
-            IHttpContextAccessor httpContextAccessor)
+            IHttpContextAccessor httpContextAccessor,
+            IAppClock clock)
         {
+            _clock = clock;
             _context             = context;
             _logger              = logger;
             _httpContextAccessor = httpContextAccessor;
@@ -43,7 +47,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 var ipAddress   = httpContext?.Connection.RemoteIpAddress?.ToString();
                 var userAgent   = httpContext?.Request.Headers.UserAgent.ToString();
 
-                var now = DateTime.Now;
+                var now = _clock.Now;
                 var existing = await _context.WebSocketConnections
                     .FirstOrDefaultAsync(c => c.ConnectionId == connectionId);
 
@@ -93,7 +97,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
                 if (connection != null)
                 {
                     connection.IsActive = false;
-                    connection.DisconnectedAt = DateTime.Now;
+                    connection.DisconnectedAt = _clock.Now;
                     await _context.SaveChangesAsync();
                     _logger.LogInformation("Conexión WebSocket desregistrada: {ConnectionId}", connectionId);
                 }
@@ -121,6 +125,20 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
             }
         }
 
+        public async Task<bool> HasActiveBrowserConnectionAsync(string browserId)
+        {
+            try
+            {
+                return await _context.WebSocketConnections
+                    .AnyAsync(c => c.IsActive && c.BrowserId == browserId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error verificando conexiones activas del navegador {BrowserId}", browserId);
+                return true;
+            }
+        }
+
         public async Task<bool> IsConnectionActiveAsync(string connectionId)
         {
             try
@@ -144,7 +162,7 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
 
                 if (connection != null)
                 {
-                    connection.LastPingAt = DateTime.Now;
+                    connection.LastPingAt = _clock.Now;
                     await _context.SaveChangesAsync();
                 }
             }
@@ -174,12 +192,12 @@ namespace WsSeguUta.AuthSystem.API.Services.Implementations
         {
             try
             {
-                var cutoffTime = DateTime.Now.AddMinutes(-inactiveMinutes);
+                var cutoffTime = _clock.Now.AddMinutes(-inactiveMinutes);
                 var inactive = await _context.WebSocketConnections
                     .Where(c => c.IsActive && (c.LastPingAt == null || c.LastPingAt < cutoffTime))
                     .ToListAsync();
 
-                var now = DateTime.Now;
+                var now = _clock.Now;
                 foreach (var connection in inactive)
                 {
                     connection.IsActive = false;
