@@ -588,14 +588,20 @@ public class AuthController : ControllerBase
         // ── Flujo AzureAD: verificar OTP, luego cambiar según método configurado ──
         if (string.Equals(user.UserType, "AzureAD", StringComparison.OrdinalIgnoreCase))
         {
+            var method = _cfg["PasswordChange:Method"] ?? "AzureWriteback";
+            var isLocalAd = string.Equals(method, "LocalAd", StringComparison.OrdinalIgnoreCase);
+
+            // Con LocalAd la contraseña actual es obligatoria: se valida ANTES de consumir el OTP para que un dato faltante
+            // no deje el código gastado (un dato incorrecto sí lo consume, a propósito, para no permitir reintentos con el mismo código).
+            if (isLocalAd && string.IsNullOrWhiteSpace(req.CurrentPassword))
+                return BadRequest(ApiResponse.Fail("La contraseña actual es requerida para cambio vía AD Local"));
+
             // OTP siempre se verifica primero independientemente del método
             var otpResult = await _auth.VerifyAndConsumePasswordOtpAsync(userId, req.OtpCode);
             if (!otpResult.Success)
                 return BadRequest(ApiResponse.Fail(otpResult.Message));
 
-            var method = _cfg["PasswordChange:Method"] ?? "AzureWriteback";
-
-            if (string.Equals(method, "LocalAd", StringComparison.OrdinalIgnoreCase))
+            if (isLocalAd)
             {
                 var (ok, msg) = await ChangePasswordViaLocalAdAsync(user, req.CurrentPassword, req.NewPassword);
                 return ok ? Ok(ApiResponse.Ok(new ChangePasswordResponse(true, msg))) : BadRequest(ApiResponse.Fail(msg));
